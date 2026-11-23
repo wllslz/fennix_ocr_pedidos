@@ -74,8 +74,3 @@ if IS_VERCEL:
     DATABASES["default"]["NAME"] = "/tmp/db.sqlite3"
     MEDIA_ROOT = Path("/tmp/media")
     os.makedirs(MEDIA_ROOT, exist_ok=True)
-    from django.core.management import call_command
-    try:
-        call_command("migrate", interactive=False, verbosity=0)
-    except Exception:
-        pass
