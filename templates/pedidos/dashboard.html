@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fennix Brasil • Leitura OCR de Pedidos</title>
+  <style>
+    :root {
+      --primary: #0f2544;
+      --accent: #b91c1c;
+      --success: #15803d;
+      --warn: #b45309;
+      --bg: #f4f6f9;
+      --card: #ffffff;
+      --border: #cbd5e1;
+      --text: #0f172a;
+      --muted: #64748b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      padding-bottom: 48px;
+    }
+    header {
+      background: var(--primary);
+      color: #fff;
+      padding: 18px 24px;
+      border-bottom: 3px solid var(--accent);
+    }
+    header h1 { margin: 0; font-size: 1.15rem; }
+    header p { margin: 4px 0 0; font-size: 0.82rem; color: #cbd5e1; }
+    .container { max-width: 1140px; margin: 22px auto; padding: 0 16px; }
+    .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+    .card {
+      background: var(--card);
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+    }
+    .card h2 {
+      margin: 0 0 14px;
+      font-size: 0.96rem;
+      color: var(--primary);
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 8px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    label { display: block; font-size: 0.78rem; font-weight: 600; color: #475569; margin-bottom: 5px; }
+    input[type="text"], input[type="file"], select {
+      width: 100%;
+      padding: 9px 11px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.88rem;
+      background: #fff;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 42px;
+      padding: 0 18px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.88rem;
+      border: none;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .btn-primary { background: var(--primary); color: #fff; width: 100%; margin-top: 12px; }
+    .btn-accent { background: var(--accent); color: #fff; width: 100%; margin-top: 12px; }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn:disabled { opacity: 0.6; cursor: wait; }
+    .kpis {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .kpi {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 14px;
+      text-align: center;
+    }
+    .kpi strong { display: block; font-size: 1.5rem; color: var(--primary); }
+    .kpi span { font-size: 0.78rem; color: var(--muted); font-weight: 600; }
+    .map-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+      background: #f8fafc;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #e2e8f0;
+    }
+    .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.85rem; min-width: 860px; }
+    th {
+      background: var(--primary);
+      color: #fff;
+      padding: 10px 8px;
+      text-align: left;
+      font-size: 0.78rem;
+    }
+    td { padding: 7px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: middle; }
+    td input { height: 34px; padding: 0 8px; font-size: 0.84rem; }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 0.74rem;
+      font-weight: 700;
+    }
+    .b-ok { background: #dcfce7; color: #15803d; }
+    .b-parcial { background: #fef3c7; color: #b45309; }
+    .b-dup { background: #e2e8f0; color: #475569; }
+    .b-erro { background: #fee2e2; color: #b91c1c; }
+    .progress-bar {
+      display: none;
+      margin-top: 10px;
+      background: #e2e8f0;
+      border-radius: 999px;
+      overflow: hidden;
+      height: 10px;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+      animation: pulse 1.2s infinite ease-in-out;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>FENNIX BRASIL • AUTOMAÇÃO DE PEDIDOS (OCR → EXCEL)</h1>
+    <p>Leitura em lote de pedidos comerciais com preenchimento direto na planilha-base</p>
+  </header>
+
+  <div class="container">
+    {% csrf_token %}
+
+    <div class="grid-2">
+      <div class="card">
+        <h2>1. Planilha Excel Modelo</h2>
+        <label>Selecionar arquivo .XLSX base</label>
+        <input type="file" id="inpPlanilha" accept=".xlsx" />
+        <button type="button" id="btnUploadPlanilha" class="btn btn-primary" onclick="enviarPlanilha()">
+          Analisar Estrutura da Planilha
+        </button>
+
+        <div id="infoPlanilha" style="margin-top:12px; font-size:0.83rem; {% if not planilha %}display:none;{% endif %}">
+          <div><strong>Arquivo ativo:</strong> <span id="lblNomePlanilha">{% if planilha %}{{ planilha.nome_original }}{% endif %}</span></div>
+          <div><strong>Aba destino:</strong> <span id="lblAbaDestino">{% if planilha %}{{ planilha.aba_destino }}{% endif %}</span></div>
+          <div class="map-grid" id="boxMapeamento">
+            <div>
+              <label>Col. Cliente</label>
+              <input type="text" id="mapCliente" value="{% if planilha %}{{ planilha.mapeamento_colunas.cliente }}{% endif %}" />
+            </div>
+            <div>
+              <label>Col. Pedido</label>
+              <input type="text" id="mapPedido" value="{% if planilha %}{{ planilha.mapeamento_colunas.pedido }}{% endif %}" />
+            </div>
+            <div>
+              <label>Col. Peso</label>
+              <input type="text" id="mapPeso" value="{% if planilha %}{{ planilha.mapeamento_colunas.peso }}{% endif %}" />
+            </div>
+            <div>
+              <label>Col. Total</label>
+              <input type="text" id="mapTotal" value="{% if planilha %}{{ planilha.mapeamento_colunas.total }}{% endif %}" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>2. Imagens dos Pedidos (Lote)</h2>
+        <label>Arraste do WhatsApp, cole com Ctrl+V ou selecione arquivos</label>
+        <div id="dropZoneWhatsApp" onclick="document.getElementById('inpImagens').click()"
+             style="border:2px dashed #94a3b8; border-radius:10px; padding:18px; text-align:center; background:#f8fafc; cursor:pointer; transition:0.2s;">
+          <div style="font-weight:700; color:#0f2544; font-size:0.9rem;">📲 Arraste as fotos do WhatsApp aqui</div>
+          <div style="font-size:0.78rem; color:#64748b; margin-top:4px;">Ou clique para selecionar • Suporta também <strong>Ctrl + V</strong> (JPG, PNG, WEBP)</div>
+          <div id="contadorFilaWhatsApp" style="margin-top:8px; font-size:0.8rem; font-weight:700; color:#15803d;">Nenhuma imagem na fila</div>
+        </div>
+        <input type="file" id="inpImagens" accept="image/*,.jpg,.jpeg,.png,.webp" multiple style="display:none;" />
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+          <div>
+            <label>Tipo de Expedição (Padrão)</label>
+            <select id="selTipoExp">
+              <option value="LOJA">LOJA</option>
+              <option value="EXPRESS">EXPRESS</option>
+              <option value="TOP">TOP</option>
+              <option value="RECARGA">RECARGA</option>
+              <option value="REMANEJO">REMANEJO</option>
+            </select>
+          </div>
+          <div>
+            <label>Responsável (Opcional)</label>
+            <input type="text" id="inpResponsavel" placeholder="Nome do conferente" />
+          </div>
+        </div>
+
+        <button type="button" id="btnProcessar" class="btn btn-accent" onclick="processarImagens()">
+          Iniciar Leitura OCR
+        </button>
+        <div id="progressBar" class="progress-bar"><div class="progress-fill"></div></div>
+      </div>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><strong id="kpiImagens">{{ lote.total_imagens|default:0 }}</strong><span>Imagens Processadas</span></div>
+      <div class="kpi"><strong id="kpiIdentificados">{{ lote.total_identificados|default:0 }}</strong><span>Pedidos Identificados</span></div>
+      <div class="kpi"><strong id="kpiPendentes">{{ lote.total_pendentes|default:0 }}</strong><span>Pendentes / Revisão</span></div>
+      <div class="kpi"><strong id="kpiExportados">{{ lote.total_exportados|default:0 }}</strong><span>Inseridos na Planilha</span></div>
+    </div>
+
+    <div class="card">
+      <h2>
+        <span>3. Conferência dos Dados Extraídos</span>
+        <div style="display:flex; gap:10px;">
+          <a id="btnDownloadExcel" href="{% if lote and lote.arquivo_exportado %}/baixar-planilha/{{ lote.id }}/{% else %}#{% endif %}"
+             class="btn btn-success" style="{% if not lote or not lote.arquivo_exportado %}display:none;{% endif %}">
+            ⬇ Baixar Planilha Atualizada (.XLSX)
+          </a>
+          <button type="button" id="btnConfirmar" class="btn btn-primary" style="width:auto; margin-top:0;" onclick="confirmarPreenchimento()">
+            Confirmar e Preencher Planilha
+          </button>
+        </div>
+      </h2>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:42px;">OK</th>
+              <th>Imagem</th>
+              <th style="width:120px;">Cliente</th>
+              <th style="width:155px;">Pedido</th>
+              <th style="width:115px;">Peso (Kg)</th>
+              <th style="width:130px;">Total (R$)</th>
+              <th style="width:110px;">Expedição</th>
+              <th>Status / Diagnóstico</th>
+            </tr>
+          </thead>
+          <tbody id="tbodyPedidos">
+            {% for p in pedidos %}
+            <tr data-id="{{ p.id }}">
+              <td><input type="checkbox" class="chk-aprovar" {% if p.status_reconhecimento != 'DUPLICADO' and p.status_reconhecimento != 'ERRO' %}checked{% endif %} /></td>
+              <td><a href="{{ p.imagem.url }}" target="_blank">{{ p.nome_imagem }}</a></td>
+              <td><input type="text" class="ed-cliente" value="{{ p.numero_cliente }}" /></td>
+              <td><input type="text" class="ed-pedido" value="{{ p.numero_pedido }}" /></td>
+              <td><input type="text" class="ed-peso" value="{% if p.peso_total %}{{ p.peso_total }}{% endif %}" /></td>
+              <td><input type="text" class="ed-total" value="{% if p.valor_total %}{{ p.valor_total }}{% endif %}" /></td>
+              <td><input type="text" class="ed-tipo" value="{{ p.tipo_expedicao }}" /></td>
+              <td>
+                <span class="badge {% if p.status_reconhecimento == 'OK' %}b-ok{% elif p.status_reconhecimento == 'PARCIAL' %}b-parcial{% elif p.status_reconhecimento == 'DUPLICADO' %}b-dup{% else %}b-erro{% endif %}">
+                  {{ p.get_status_reconhecimento_display }}
+                </span>
+                <div style="font-size:0.75rem; color:#64748b; margin-top:2px;">{{ p.observacao_ocr }}</div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let planilhaIdAtual = {{ planilha.id|default:"null" }};
+    let loteIdAtual = {{ lote.id|default:"null" }};
+    const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+
+    async function enviarPlanilha() {
+      const inp = document.getElementById('inpPlanilha');
+      if (!inp.files.length) return alert('Selecione um arquivo .xlsx.');
+
+      const fd = new FormData();
+      fd.append('planilha', inp.files[0]);
+
+      const btn = document.getElementById('btnUploadPlanilha');
+      btn.disabled = true;
+      btn.textContent = 'Analisando planilha...';
+
+      try {
+        const resp = await fetch('/upload-planilha/', {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrfToken },
+          body: fd
+        });
+        const data = await resp.json();
+        if (!data.ok) return alert(data.erro);
+
+        planilhaIdAtual = data.planilha_id;
+        document.getElementById('infoPlanilha').style.display = 'block';
+        document.getElementById('lblNomePlanilha').textContent = data.nome;
+        document.getElementById('lblAbaDestino').textContent = data.aba_destino;
+        document.getElementById('mapCliente').value = data.mapeamento.cliente || '';
+        document.getElementById('mapPedido').value = data.mapeamento.pedido || '';
+        document.getElementById('mapPeso').value = data.mapeamento.peso || '';
+        document.getElementById('mapTotal').value = data.mapeamento.total || '';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Analisar Estrutura da Planilha';
+      }
+    }
+
+    let filaArquivosWhatsApp = [];
+
+    function atualizarContadorFila() {
+      const lbl = document.getElementById('contadorFilaWhatsApp');
+      if (!filaArquivosWhatsApp.length) {
+        lbl.textContent = 'Nenhuma imagem na fila';
+      } else {
+        lbl.textContent = `${filaArquivosWhatsApp.length} imagem(ns) pronta(s) para leitura OCR`;
+      }
+    }
+
+    function adicionarArquivosFila(fileList) {
+      for (const f of fileList) {
+        if (f.type.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(f.name)) {
+          const nome = f.name && f.name !== 'image.png' ? f.name : `whatsapp_${Date.now()}_${filaArquivosWhatsApp.length + 1}.png`;
+          const arquivoNomeado = new File([f], nome, { type: f.type || 'image/png' });
+          filaArquivosWhatsApp.push(arquivoNomeado);
+        }
+      }
+      atualizarContadorFila();
+    }
+
+    document.getElementById('inpImagens').addEventListener('change', (e) => {
+      adicionarArquivosFila(e.target.files);
+      e.target.value = '';
+    });
+
+    const dz = document.getElementById('dropZoneWhatsApp');
+    dz.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dz.style.borderColor = '#b91c1c';
+      dz.style.background = '#fef2f2';
+    });
+    dz.addEventListener('dragleave', () => {
+      dz.style.borderColor = '#94a3b8';
+      dz.style.background = '#f8fafc';
+    });
+    dz.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dz.style.borderColor = '#94a3b8';
+      dz.style.background = '#f8fafc';
+      if (e.dataTransfer.files && e.dataTransfer.files.length) {
+        adicionarArquivosFila(e.dataTransfer.files);
+      }
+    });
+
+    document.addEventListener('paste', (e) => {
+      const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+      const colados = [];
+      for (const item of items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const blob = item.getAsFile();
+          if (blob) colados.push(blob);
+        }
+      }
+      if (colados.length) {
+        adicionarArquivosFila(colados);
+      }
+    });
+
+    async function processarImagens() {
+      if (!filaArquivosWhatsApp.length) return alert('Arraste, cole (Ctrl+V) ou selecione pelo menos uma imagem do WhatsApp.');
+
+      const fd = new FormData();
+      if (planilhaIdAtual) fd.append('planilha_id', planilhaIdAtual);
+      fd.append('tipo_expedicao', document.getElementById('selTipoExp').value);
+      fd.append('responsavel', document.getElementById('inpResponsavel').value);
+      for (const f of filaArquivosWhatsApp) fd.append('imagens', f);
+
+      const btn = document.getElementById('btnProcessar');
+      const bar = document.getElementById('progressBar');
+      btn.disabled = true;
+      btn.textContent = 'Processando imagens via OCR...';
+      bar.style.display = 'block';
+
+      try {
+        const resp = await fetch('/processar-lote/', {
+          method: 'POST',
+          headers: { 'X-CSRFToken': csrfToken },
+          body: fd
+        });
+        const data = await resp.json();
+        if (!data.ok) return alert(data.erro);
+
+        loteIdAtual = data.lote_id;
+        document.getElementById('kpiImagens').textContent = data.resumo.total_imagens;
+        document.getElementById('kpiIdentificados').textContent = data.resumo.total_identificados;
+        document.getElementById('kpiPendentes').textContent = data.resumo.total_pendentes;
+        renderizarTabela(data.pedidos);
+        filaArquivosWhatsApp = [];
+        atualizarContadorFila();
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Iniciar Leitura OCR';
+        bar.style.display = 'none';
+      }
+    }
+
+    function renderizarTabela(pedidos) {
+      const tbody = document.getElementById('tbodyPedidos');
+      tbody.innerHTML = '';
+      for (const p of pedidos) {
+        const checked = (p.status_reconhecimento !== 'DUPLICADO' && p.status_reconhecimento !== 'ERRO') ? 'checked' : '';
+        const cls = p.status_reconhecimento === 'OK' ? 'b-ok'
+                  : p.status_reconhecimento === 'PARCIAL' ? 'b-parcial'
+                  : p.status_reconhecimento === 'DUPLICADO' ? 'b-dup' : 'b-erro';
+        const tr = document.createElement('tr');
+        tr.dataset.id = p.id;
+        tr.innerHTML = `
+          <td><input type="checkbox" class="chk-aprovar" ${checked} /></td>
+          <td><a href="${p.imagem_url}" target="_blank">${p.nome_imagem}</a></td>
+          <td><input type="text" class="ed-cliente" value="${p.numero_cliente}" /></td>
+          <td><input type="text" class="ed-pedido" value="${p.numero_pedido}" /></td>
+          <td><input type="text" class="ed-peso" value="${p.peso_total}" /></td>
+          <td><input type="text" class="ed-total" value="${p.valor_total}" /></td>
+          <td><input type="text" class="ed-tipo" value="${p.tipo_expedicao}" /></td>
+          <td>
+            <span class="badge ${cls}">${p.status_reconhecimento}</span>
+            <div style="font-size:0.75rem; color:#64748b; margin-top:2px;">${p.observacao_ocr}</div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      }
+    }
+
+    async function confirmarPreenchimento() {
+      if (!loteIdAtual) return alert('Nenhum lote processado ainda.');
+
+      if (planilhaIdAtual) {
+        await fetch('/atualizar-mapeamento/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+          body: JSON.stringify({
+            planilha_id: planilhaIdAtual,
+            mapeamento: {
+              cliente: document.getElementById('mapCliente').value.trim().toUpperCase(),
+              pedido: document.getElementById('mapPedido').value.trim().toUpperCase(),
+              peso: document.getElementById('mapPeso').value.trim().toUpperCase(),
+              total: document.getElementById('mapTotal').value.trim().toUpperCase(),
+              data: 'A', mes: 'B', tipo_expedicao: 'H', status_separacao: 'I', responsavel: 'L'
+            }
+          })
+        });
+      }
+
+      const registros = [];
+      document.querySelectorAll('#tbodyPedidos tr').forEach(tr => {
+        registros.push({
+          id: parseInt(tr.dataset.id, 10),
+          aprovar: tr.querySelector('.chk-aprovar').checked,
+          numero_cliente: tr.querySelector('.ed-cliente').value,
+          numero_pedido: tr.querySelector('.ed-pedido').value,
+          peso_total: tr.querySelector('.ed-peso').value,
+          valor_total: tr.querySelector('.ed-total').value,
+          tipo_expedicao: tr.querySelector('.ed-tipo').value,
+        });
+      });
+
+      const btn = document.getElementById('btnConfirmar');
+      btn.disabled = true;
+      btn.textContent = 'Gravando na planilha...';
+
+      try {
+        const resp = await fetch('/confirmar-exportacao/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+          body: JSON.stringify({ lote_id: loteIdAtual, registros })
+        });
+        const data = await resp.json();
+        if (!data.ok) return alert(data.erro);
+
+        document.getElementById('kpiExportados').textContent = data.inseridos;
+        const dl = document.getElementById('btnDownloadExcel');
+        dl.href = data.download_url;
+        dl.style.display = 'inline-flex';
+        alert(`Concluído! ${data.inseridos} pedido(s) inserido(s). Duplicados ignorados: ${data.duplicados.length}.`);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Confirmar e Preencher Planilha';
+      }
+    }
+  </script>
+</body>
+</html>
