@@ -323,12 +323,32 @@
 
     let filaArquivosWhatsApp = [];
 
+    function removerItemFila(idx) {
+      filaArquivosWhatsApp.splice(idx, 1);
+      atualizarContadorFila();
+    }
+
+    function limparSomenteFila() {
+      filaArquivosWhatsApp = [];
+      atualizarContadorFila();
+    }
+
     function atualizarContadorFila() {
       const lbl = document.getElementById('contadorFilaWhatsApp');
+      const box = document.getElementById('listaFilaPreview');
       if (!filaArquivosWhatsApp.length) {
-        lbl.textContent = 'Nenhuma imagem na fila';
+        lbl.textContent = 'Nenhuma imagem na fila (selecione, arraste ou cole várias imagens com Ctrl+V)';
+        if (box) box.innerHTML = '';
       } else {
-        lbl.textContent = `${filaArquivosWhatsApp.length} imagem(ns) pronta(s) para leitura OCR`;
+        lbl.textContent = `${filaArquivosWhatsApp.length} imagem(ns) na fila pronta(s) para processar`;
+        if (box) {
+          box.innerHTML = filaArquivosWhatsApp.map((f, i) => `
+            <span style="display:inline-flex; align-items:center; gap:6px; background:#e2e8f0; color:#0f172a; padding:3px 8px; border-radius:999px; font-size:0.75rem;">
+              ${i + 1}. ${f.name}
+              <button type="button" onclick="removerItemFila(${i})" style="border:none; background:none; color:#b91c1c; font-weight:700; cursor:pointer; padding:0;">&times;</button>
+            </span>
+          `).join('');
+        }
       }
     }
 
@@ -541,9 +561,16 @@
 
         document.getElementById('kpiExportados').textContent = data.inseridos;
         const dl = document.getElementById('btnDownloadExcel');
-        dl.href = data.download_url;
-        dl.style.display = 'inline-flex';
-        alert(`Concluído! ${data.inseridos} pedido(s) inserido(s). Duplicados ignorados: ${data.duplicados.length}.`);
+        if (dl && data.download_url) {
+          dl.href = data.download_url;
+          dl.style.display = 'inline-flex';
+          dl.style.alignItems = 'center';
+          dl.style.background = '#15803d';
+          dl.style.color = '#ffffff';
+          dl.style.fontWeight = '700';
+          dl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        alert(`Concluído! ${data.inseridos} pedido(s) inserido(s). Clique no botão verde "Baixar Planilha Atualizada (.XLSX)" para baixar.`);
       } finally {
         btn.disabled = false;
         btn.textContent = 'Confirmar e Preencher Planilha';

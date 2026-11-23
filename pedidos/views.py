@@ -193,8 +193,33 @@ def confirmar_exportacao(request):
     except Exception:
         return JsonResponse({"ok": False, "erro": "JSON inválido."}, status=400)
     lote = LoteProcessamento.objects.filter(id=data.get("lote_id")).first()
-    if not lote or not lote.planilha.arquivo_modelo:
-        return JsonResponse({"ok": False, "erro": "Use a exportação direta com a planilha selecionada."}, status=400)
+    if not lote:
+        return JsonResponse({"ok": False, "erro": "Lote não encontrado. Processe ao menos uma imagem antes."}, status=400)
+
+    if not lote.planilha:
+        lote.planilha = _obter_ou_criar_planilha_padrao(None)
+        lote.save()
+
+    if not lote.planilha.arquivo_modelo:
+        import openpyxl
+        dir_planilhas = os.path.join(settings.MEDIA_ROOT, "planilhas")
+        os.makedirs(dir_planilhas, exist_ok=True)
+        nome_base = f"BASE_FENNIX_{lote.planilha.id}.xlsx"
+        caminho_gerado = os.path.join(dir_planilhas, nome_base)
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "BASE"
+        ws.append(["Data", "Mês", "Cliente", "Pedido", "Peso", "Total", "Observação", "Tipo Expedição", "Status Separação", "Conferente", "Nota", "Responsável"])
+        wb.save(caminho_gerado)
+        lote.planilha.nome_original = nome_base
+        lote.planilha.aba_destino = "BASE"
+        lote.planilha.mapeamento_colunas = {
+            "data": "A", "mes": "B", "cliente": "C", "pedido": "D",
+            "peso": "E", "total": "F", "tipo_expedicao": "H",
+            "status_separacao": "I", "responsavel": "L",
+        }
+        lote.planilha.arquivo_modelo.name = os.path.relpath(caminho_gerado, settings.MEDIA_ROOT).replace("\\", "/")
+        lote.planilha.save()
 
     registros = data.get("registros", [])
     aprovados = []
@@ -230,7 +255,7 @@ def confirmar_exportacao(request):
         mapeamento=lote.planilha.mapeamento_colunas,
         pedidos_aprovados=aprovados,
     )
-    lote.arquivo_exportado.name = os.path.relpath(caminho_saida, os.path.join(os.path.dirname(lote.planilha.arquivo_modelo.path), ".."))
+    lote.arquivo_exportado.name = os.path.relpath(caminho_saida, settings.MEDIA_ROOT).replace("\\", "/")
     lote.status = "EXPORTADO"
     lote.save()
 
