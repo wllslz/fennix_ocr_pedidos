@@ -1,6 +1,6 @@
 # Histórico de Versões (Changelog)
 
-Registro cronológico desde o primeiro commit do repositório (15 commits).
+Registro cronológico desde o primeiro commit do repositório (16 commits).
 
 ## 1. 0bbefe2 (2026-11-23) - feat: sistema Django OCR de pedidos pronto para Vercel e WhatsApp
 - **Autor:** Willian Lira de Souza
@@ -44,6 +44,9 @@ Registro cronológico desde o primeiro commit do repositório (15 commits).
 ## 14. 6ed0920 (2026-11-23) - fix(revisao-total): corrige imports settings/criar_backup_planilha, preview da fila e exportacao completa
 - **Autor:** Willian Lira
 
-## 15. Entrega Atual - feat(base-padrao): define MANITORAMENTO EXPEDICAO como planilha base padrao do site
-- **Resumo:** Incorpora a planilha oficial MANITORAMENTO EXPEDIÇÃO como base padrão automática do dashboard e do webhook, configurada para a aba 'BASE ' e mapeamento C (Cliente), D (Peso), E (Valor) e F (Pedido).
+## 15. 3c57b39 (2026-11-23) - feat(base-padrao): define MANITORAMENTO EXPEDICAO como planilha base padrao do site
+- **Autor:** Willian Lira
+
+## 16. Entrega Atual - feat(excel-style): clona altura da linha e ignora linhas apenas com bordas na insercao
+- **Resumo:** Atualiza `_copiar_estilo_linha` em `pedidos/services/excel_service.py` para clonar `row_dimensions.height` e `protection`, e restringe a detecção da última linha preenchida aos campos reais de pedido (Cliente, Pedido, Peso e Total).
 

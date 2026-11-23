@@ -142,6 +142,8 @@ def criar_backup_planilha(caminho_origem: str, pasta_backups: str) -> str:
 def _copiar_estilo_linha(ws, linha_origem: int, linha_destino: int, max_col: int):
     if linha_origem < 1:
         return
+    if linha_origem in ws.row_dimensions and ws.row_dimensions[linha_origem].height:
+        ws.row_dimensions[linha_destino].height = ws.row_dimensions[linha_origem].height
     for c in range(1, max_col + 1):
         src = ws.cell(linha_origem, c)
         dst = ws.cell(linha_destino, c)
@@ -151,6 +153,7 @@ def _copiar_estilo_linha(ws, linha_origem: int, linha_destino: int, max_col: int
             dst.border = copy(src.border)
             dst.alignment = copy(src.alignment)
             dst.number_format = src.number_format
+            dst.protection = copy(src.protection)
 
 
 def _converter_identificador(valor_str: str):
@@ -212,7 +215,10 @@ def inserir_pedidos_na_planilha(
     col_resp = _col_idx_seguro(map_efetivo.get("responsavel"))
 
     cols_monitoradas = [
-        c for c in (col_cliente, col_pedido, col_peso, col_total, col_data, col_mes, col_tipo, col_status, col_resp)
+        c for c in (col_cliente, col_pedido, col_peso, col_total)
+        if c is not None
+    ] or [
+        c for c in (col_data, col_mes, col_tipo, col_status, col_resp)
         if c is not None
     ]
     if not cols_monitoradas:
