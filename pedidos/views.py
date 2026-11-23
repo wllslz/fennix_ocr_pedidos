@@ -1,9 +1,8 @@
 import os
 import json
 import base64
-import tempfile
 import urllib.request
-from decimal import Decimal
+from django.conf import settings
 from django.http import JsonResponse, FileResponse, HttpResponse
 from django.shortcuts import render
 from django.core.files.base import ContentFile
@@ -12,7 +11,11 @@ from django.views.decorators.http import require_POST
 
 from .models import PlanilhaModelo, LoteProcessamento, PedidoExtraido
 from .forms import PlanilhaUploadForm, validar_imagem_pedido
-from .services.excel_service import analisar_estrutura_planilha, inserir_pedidos_na_planilha
+from .services.excel_service import (
+    analisar_estrutura_planilha,
+    criar_backup_planilha,
+    inserir_pedidos_na_planilha,
+)
 from .services.image_processor import preprocessar_imagem_pedido
 from .services.ocr_engine import executar_ocr
 from .services.field_extractor import extrair_campos_pedido, parse_decimal_br
@@ -22,15 +25,15 @@ def _obter_ou_criar_planilha_padrao(planilha_id=None):
     planilha = PlanilhaModelo.objects.filter(id=planilha_id).first() if planilha_id else PlanilhaModelo.objects.first()
     if not planilha:
         planilha = PlanilhaModelo.objects.create(
-            nome_original="MANITORAMENTO_EXPEDICAO_BASE.xlsx",
-            aba_destino="BASE ",
+            nome_original="MONITORAMENTO_EXPEDICAO_BASE.xlsx",
+            aba_destino="BASE",
             mapeamento_colunas={
-                "cliente": "C",
-                "pedido": "F",
-                "peso": "D",
-                "total": "E",
                 "data": "A",
                 "mes": "B",
+                "cliente": "C",
+                "pedido": "D",
+                "peso": "E",
+                "total": "F",
                 "tipo_expedicao": "H",
                 "status_separacao": "I",
                 "responsavel": "L",
@@ -66,23 +69,33 @@ def upload_planilha(request):
         nome_original=arquivo.name,
         arquivo_original=arquivo,
     )
-    info = analisar_estrutura_planilha(planilha.arquivo_original.path)
-    planilha.aba_destino = info["aba_destino"]
-    planilha.mapeamento_colunas = info["mapeamento"]
-    planilha.save()
+    try:
+        info = analisar_estrutura_planilha(planilha.arquivo_original.path)
+        planilha.aba_destino = info["aba_destino"]
+        planilha.mapeamento_colunas = info["mapeamento"]
+        planilha.metadados_estrutura = info
+        planilha.save()
 
-    m = info["mapeamento"] or {}
-    resumo_cols = f"Cliente: {m.get('cliente') or '-'} | Pedido: {m.get('pedido') or '-'} | Peso: {m.get('peso') or '-'} | Total: {m.get('total') or '-'}"
-    return JsonResponse({
-        "ok": True,
-        "planilha_id": planilha.id,
-        "nome": planilha.nome_original,
-        "abas": info["abas"],
-        "aba_destino": info["aba_destino"],
-        "linha_cabecalho": info.get("linha_cabecalho"),
-        "mapeamento": m,
-        "mensagem": f"Estrutura analisada na aba '{info['aba_destino']}' (cabeçalho na linha {info.get('linha_cabecalho') or '?'}). Colunas -> {resumo_cols}",
-    })
+        m = info["mapeamento"] or {}
+        resumo_cols = (
+            f"Cliente: {m.get('cliente') or '-'} | "
+            f"Pedido: {m.get('pedido') or '-'} | "
+            f"Peso: {m.get('peso') or '-'} | "
+            f"Total: {m.get('total') or '-'}"
+        )
+        return JsonResponse({
+            "ok": True,
+            "planilha_id": planilha.id,
+            "nome": planilha.nome_original,
+            "abas": info["abas"],
+            "aba_destino": info["aba_destino"],
+            "linha_cabecalho": info.get("linha_cabecalho"),
+            "mapeamento": m,
+            "mensagem": f"Estrutura analisada na aba '{info['aba_destino']}' (cabeçalho na linha {info.get('linha_cabecalho') or 1}). Colunas -> {resumo_cols}",
+        })
+    except Exception as e:
+        planilha.delete()
+        return JsonResponse({"ok": False, "erro": f"Erro ao analisar planilha: {e}"}, status=500)
 
 
 @require_POST
@@ -91,19 +104,30 @@ def atualizar_mapeamento(request):
         data = json.loads(request.body.decode("utf-8"))
     except Exception:
         return JsonResponse({"ok": False, "erro": "JSON inválido."}, status=400)
+
     planilha = _obter_ou_criar_planilha_padrao(data.get("planilha_id"))
     nova_aba = str(data.get("aba_destino") or planilha.aba_destino or "BASE").strip()
-    novo_map = data.get("mapeamento") or planilha.mapeamento_colunas or {}
+    novo_map = dict(planilha.mapeamento_colunas or {})
+    for k, v in (data.get("mapeamento") or {}).items():
+        if v is not None and str(v).strip():
+            novo_map[k] = str(v).strip().upper()
+
     planilha.aba_destino = nova_aba
     planilha.mapeamento_colunas = novo_map
     planilha.save()
-    resumo_cols = f"Cliente: {novo_map.get('cliente') or '-'} | Pedido: {novo_map.get('pedido') or '-'} | Peso: {novo_map.get('peso') or '-'} | Total: {novo_map.get('total') or '-'}"
+
+    resumo_cols = (
+        f"Cliente: {novo_map.get('cliente') or '-'} | "
+        f"Pedido: {novo_map.get('pedido') or '-'} | "
+        f"Peso: {novo_map.get('peso') or '-'} | "
+        f"Total: {novo_map.get('total') or '-'}"
+    )
     return JsonResponse({
         "ok": True,
         "planilha_id": planilha.id,
         "aba_destino": planilha.aba_destino,
         "mapeamento": planilha.mapeamento_colunas,
-        "mensagem": f"Estrutura atualizada com sucesso na aba '{planilha.aba_destino}'. Colunas -> {resumo_cols}",
+        "mensagem": f"Estrutura atualizada na aba '{planilha.aba_destino}'. Colunas -> {resumo_cols}",
     })
 
 
@@ -205,6 +229,7 @@ def confirmar_exportacao(request):
         data = json.loads(request.body.decode("utf-8"))
     except Exception:
         return JsonResponse({"ok": False, "erro": "JSON inválido."}, status=400)
+
     lote = LoteProcessamento.objects.filter(id=data.get("lote_id")).first()
     if not lote:
         return JsonResponse({"ok": False, "erro": "Lote não encontrado. Processe ao menos uma imagem antes."}, status=400)
@@ -213,23 +238,33 @@ def confirmar_exportacao(request):
         lote.planilha = _obter_ou_criar_planilha_padrao(None)
         lote.save()
 
-    if not lote.planilha.arquivo_original:
+    if not lote.planilha.arquivo_original or not os.path.exists(lote.planilha.arquivo_original.path):
         import openpyxl
-        dir_planilhas = os.path.join(settings.MEDIA_ROOT, "planilhas")
+        dir_planilhas = os.path.join(settings.MEDIA_ROOT, "planilhas_base")
         os.makedirs(dir_planilhas, exist_ok=True)
         nome_base = f"BASE_FENNIX_{lote.planilha.id}.xlsx"
         caminho_gerado = os.path.join(dir_planilhas, nome_base)
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "BASE"
-        ws.append(["Data", "Mês", "Cliente", "Pedido", "Peso", "Total", "Observação", "Tipo Expedição", "Status Separação", "Conferente", "Nota", "Responsável"])
+        ws.append([
+            "Data", "Mês", "Cliente", "Pedido", "Peso", "Total",
+            "Observação", "Tipo Expedição", "Status Separação",
+            "Conferente", "Nota", "Responsável",
+        ])
         wb.save(caminho_gerado)
         lote.planilha.nome_original = nome_base
         lote.planilha.aba_destino = "BASE"
         lote.planilha.mapeamento_colunas = {
-            "data": "A", "mes": "B", "cliente": "C", "pedido": "D",
-            "peso": "E", "total": "F", "tipo_expedicao": "H",
-            "status_separacao": "I", "responsavel": "L",
+            "data": "A",
+            "mes": "B",
+            "cliente": "C",
+            "pedido": "D",
+            "peso": "E",
+            "total": "F",
+            "tipo_expedicao": "H",
+            "status_separacao": "I",
+            "responsavel": "L",
         }
         lote.planilha.arquivo_original.name = os.path.relpath(caminho_gerado, settings.MEDIA_ROOT).replace("\\", "/")
         lote.planilha.save()
@@ -246,10 +281,12 @@ def confirmar_exportacao(request):
         rec.peso_total = parse_decimal_br(str(item.get("peso_total", "")))
         rec.valor_total = parse_decimal_br(str(item.get("valor_total", "")))
         rec.tipo_expedicao = str(item.get("tipo_expedicao", "LOJA")).strip().upper()
-        rec.responsavel = str(item.get("responsavel", "")).strip()
+        if "responsavel" in item and item.get("responsavel") is not None:
+            rec.responsavel = str(item.get("responsavel", "")).strip()
         if not aprovar:
             rec.status_planilha = "IGNORADO"
         rec.save()
+
         if aprovar:
             aprovados.append({
                 "id": rec.id,
@@ -264,21 +301,24 @@ def confirmar_exportacao(request):
     if not aprovados:
         return JsonResponse({"ok": False, "erro": "Marque ao menos um pedido na tabela antes de preencher a planilha."}, status=400)
 
-    caminho_origem = lote.planilha.arquivo_original.path
-    backup_path = criar_backup_planilha(caminho_origem, os.path.join(settings.MEDIA_ROOT, "backups"))
+    try:
+        caminho_origem = lote.planilha.arquivo_original.path
+        backup_path = criar_backup_planilha(caminho_origem, os.path.join(settings.MEDIA_ROOT, "backups"))
 
-    base_nome = os.path.basename(lote.planilha.nome_original or "planilha.xlsx")
-    dir_exportados = os.path.join(settings.MEDIA_ROOT, "exportados")
-    os.makedirs(dir_exportados, exist_ok=True)
-    caminho_saida = os.path.join(dir_exportados, f"ATUALIZADO_LOTE_{lote.id}_{base_nome}")
+        base_nome = os.path.basename(lote.planilha.nome_original or "planilha.xlsx")
+        dir_exportados = os.path.join(settings.MEDIA_ROOT, "exportados")
+        os.makedirs(dir_exportados, exist_ok=True)
+        caminho_saida = os.path.join(dir_exportados, f"ATUALIZADO_LOTE_{lote.id}_{base_nome}")
 
-    resultado = inserir_pedidos_na_planilha(
-        caminho_base=caminho_origem,
-        caminho_saida=caminho_saida,
-        aba_destino=lote.planilha.aba_destino,
-        mapeamento=lote.planilha.mapeamento_colunas,
-        pedidos_aprovados=aprovados,
-    )
+        resultado = inserir_pedidos_na_planilha(
+            caminho_base=caminho_origem,
+            caminho_saida=caminho_saida,
+            aba_destino=lote.planilha.aba_destino,
+            mapeamento=lote.planilha.mapeamento_colunas,
+            pedidos_aprovados=aprovados,
+        )
+    except Exception as e:
+        return JsonResponse({"ok": False, "erro": f"Erro ao gravar na planilha Excel: {e}"}, status=500)
 
     for ins in resultado["inseridos"]:
         PedidoExtraido.objects.filter(id=ins["id"]).update(

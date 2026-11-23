@@ -204,6 +204,11 @@
           <div style="font-size:0.78rem; color:#64748b; margin-top:4px;">Ou clique para selecionar • Suporta também <strong>Ctrl + V</strong> (JPG, PNG, WEBP)</div>
           <div id="contadorFilaWhatsApp" style="margin-top:8px; font-size:0.8rem; font-weight:700; color:#15803d;">Nenhuma imagem na fila</div>
         </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:6px;">
+          <span style="font-size:0.75rem; color:#64748b;">Arquivos selecionados/colados:</span>
+          <button type="button" onclick="limparSomenteFila()" style="border:none; background:none; color:#b91c1c; font-size:0.75rem; font-weight:700; cursor:pointer; text-decoration:underline;">Limpar fila</button>
+        </div>
+        <div id="listaFilaPreview" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;"></div>
         <input type="file" id="inpImagens" accept="image/*,.jpg,.jpeg,.png,.webp" multiple style="display:none;" />
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
@@ -356,8 +361,7 @@
         cliente: document.getElementById('mapCliente').value.trim().toUpperCase(),
         pedido: document.getElementById('mapPedido').value.trim().toUpperCase(),
         peso: document.getElementById('mapPeso').value.trim().toUpperCase(),
-        total: document.getElementById('mapTotal').value.trim().toUpperCase(),
-        data: 'A', mes: 'B', tipo_expedicao: 'H', status_separacao: 'I', responsavel: 'L'
+        total: document.getElementById('mapTotal').value.trim().toUpperCase()
       };
       try {
         const resp = await fetch('/atualizar-mapeamento/', {
@@ -583,20 +587,7 @@
       if (!loteIdAtual) return alert('Nenhum lote processado ainda.');
 
       if (planilhaIdAtual) {
-        await fetch('/atualizar-mapeamento/', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
-          body: JSON.stringify({
-            planilha_id: planilhaIdAtual,
-            mapeamento: {
-              cliente: document.getElementById('mapCliente').value.trim().toUpperCase(),
-              pedido: document.getElementById('mapPedido').value.trim().toUpperCase(),
-              peso: document.getElementById('mapPeso').value.trim().toUpperCase(),
-              total: document.getElementById('mapTotal').value.trim().toUpperCase(),
-              data: 'A', mes: 'B', tipo_expedicao: 'H', status_separacao: 'I', responsavel: 'L'
-            }
-          })
-        });
+        await salvarEstruturaPlanilha();
       }
 
       const registros = [];
@@ -622,8 +613,15 @@
           headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
           body: JSON.stringify({ lote_id: loteIdAtual, registros })
         });
-        const data = await resp.json();
-        if (!data.ok) return alert(data.erro);
+        const rawTxt = await resp.text();
+        let data;
+        try {
+          data = JSON.parse(rawTxt);
+        } catch (parseErr) {
+          alert(`Erro inesperado no servidor (HTTP ${resp.status}) ao preencher a planilha.`);
+          return;
+        }
+        if (!data.ok) return alert(data.erro || 'Erro ao preencher planilha.');
 
         document.getElementById('kpiExportados').textContent = data.inseridos;
         const dl = document.getElementById('btnDownloadExcel');
@@ -636,7 +634,10 @@
           dl.style.fontWeight = '700';
           dl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
-        alert(`Concluído! ${data.inseridos} pedido(s) inserido(s). Clique no botão verde "Baixar Planilha Atualizada (.XLSX)" para baixar.`);
+        const linhasInfo = Array.isArray(data.linhas) && data.linhas.length ? ` (linhas: ${data.linhas.join(', ')})` : '';
+        alert(`Concluído! ${data.inseridos} pedido(s) gravado(s) na aba "${data.aba_utilizada || 'BASE'}"${linhasInfo}. Clique em "Baixar Planilha Atualizada (.XLSX)".`);
+      } catch (err) {
+        alert(`Falha ao preencher a planilha: ${err}`);
       } finally {
         btn.disabled = false;
         btn.textContent = 'Confirmar e Preencher Planilha';
