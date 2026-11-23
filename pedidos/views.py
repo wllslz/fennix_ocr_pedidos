@@ -64,9 +64,9 @@ def upload_planilha(request):
     arquivo = form.cleaned_data["planilha"]
     planilha = PlanilhaModelo.objects.create(
         nome_original=arquivo.name,
-        arquivo_modelo=arquivo,
+        arquivo_original=arquivo,
     )
-    info = analisar_estrutura_planilha(planilha.arquivo_modelo.path)
+    info = analisar_estrutura_planilha(planilha.arquivo_original.path)
     planilha.aba_destino = info["aba_destino"]
     planilha.mapeamento_colunas = info["mapeamento"]
     planilha.save()
@@ -213,7 +213,7 @@ def confirmar_exportacao(request):
         lote.planilha = _obter_ou_criar_planilha_padrao(None)
         lote.save()
 
-    if not lote.planilha.arquivo_modelo:
+    if not lote.planilha.arquivo_original:
         import openpyxl
         dir_planilhas = os.path.join(settings.MEDIA_ROOT, "planilhas")
         os.makedirs(dir_planilhas, exist_ok=True)
@@ -231,7 +231,7 @@ def confirmar_exportacao(request):
             "peso": "E", "total": "F", "tipo_expedicao": "H",
             "status_separacao": "I", "responsavel": "L",
         }
-        lote.planilha.arquivo_modelo.name = os.path.relpath(caminho_gerado, settings.MEDIA_ROOT).replace("\\", "/")
+        lote.planilha.arquivo_original.name = os.path.relpath(caminho_gerado, settings.MEDIA_ROOT).replace("\\", "/")
         lote.planilha.save()
 
     registros = data.get("registros", [])
@@ -240,15 +240,17 @@ def confirmar_exportacao(request):
         rec = PedidoExtraido.objects.filter(id=item.get("id"), lote=lote).first()
         if not rec:
             continue
+        aprovar = bool(item.get("aprovar", True))
         rec.numero_cliente = str(item.get("numero_cliente", "")).strip()
         rec.numero_pedido = str(item.get("numero_pedido", "")).strip()
         rec.peso_total = parse_decimal_br(str(item.get("peso_total", "")))
         rec.valor_total = parse_decimal_br(str(item.get("valor_total", "")))
         rec.tipo_expedicao = str(item.get("tipo_expedicao", "LOJA")).strip().upper()
         rec.responsavel = str(item.get("responsavel", "")).strip()
-        rec.aprovado_usuario = bool(item.get("aprovar", True))
+        if not aprovar:
+            rec.status_planilha = "IGNORADO"
         rec.save()
-        if rec.aprovado_usuario:
+        if aprovar:
             aprovados.append({
                 "id": rec.id,
                 "numero_cliente": rec.numero_cliente,
@@ -259,18 +261,45 @@ def confirmar_exportacao(request):
                 "responsavel": rec.responsavel,
             })
 
-    nome_saida = f"ATUALIZADO_{os.path.basename(lote.planilha.nome_original or "planilha.xlsx")}"
-    caminho_saida = os.path.join(os.path.dirname(lote.planilha.arquivo_modelo.path), f"lote_{lote.id}_{nome_saida}")
+    if not aprovados:
+        return JsonResponse({"ok": False, "erro": "Marque ao menos um pedido na tabela antes de preencher a planilha."}, status=400)
+
+    caminho_origem = lote.planilha.arquivo_original.path
+    backup_path = criar_backup_planilha(caminho_origem, os.path.join(settings.MEDIA_ROOT, "backups"))
+
+    base_nome = os.path.basename(lote.planilha.nome_original or "planilha.xlsx")
+    dir_exportados = os.path.join(settings.MEDIA_ROOT, "exportados")
+    os.makedirs(dir_exportados, exist_ok=True)
+    caminho_saida = os.path.join(dir_exportados, f"ATUALIZADO_LOTE_{lote.id}_{base_nome}")
+
     resultado = inserir_pedidos_na_planilha(
-        caminho_base=lote.planilha.arquivo_modelo.path,
+        caminho_base=caminho_origem,
         caminho_saida=caminho_saida,
         aba_destino=lote.planilha.aba_destino,
         mapeamento=lote.planilha.mapeamento_colunas,
         pedidos_aprovados=aprovados,
     )
-    lote.arquivo_exportado.name = os.path.relpath(caminho_saida, settings.MEDIA_ROOT).replace("\\", "/")
-    lote.status = "EXPORTADO"
+
+    for ins in resultado["inseridos"]:
+        PedidoExtraido.objects.filter(id=ins["id"]).update(
+            status_planilha="INSERIDO",
+            linha_inserida=ins["linha"],
+        )
+
+    for dup_ped in resultado["duplicados"]:
+        PedidoExtraido.objects.filter(lote=lote, numero_pedido=dup_ped).update(
+            status_reconhecimento="DUPLICADO",
+            status_planilha="IGNORADO",
+            observacao_ocr=f"Pedido {dup_ped} já existia na planilha Excel.",
+        )
+
+    lote.total_exportados = len(resultado["inseridos"])
+    lote.arquivo_exportado = caminho_saida
+    lote.backup_gerado = backup_path
     lote.save()
+
+    lote.planilha.arquivo_atualizado = caminho_saida
+    lote.planilha.save()
 
     linhas_gravadas = [str(x["linha"]) for x in resultado["inseridos"]]
     return JsonResponse({
@@ -286,11 +315,17 @@ def confirmar_exportacao(request):
 def baixar_planilha(request, lote_id):
     lote = LoteProcessamento.objects.filter(id=lote_id).first()
     if not lote or not lote.arquivo_exportado:
-        return JsonResponse({"ok": False, "erro": "Arquivo não encontrado."}, status=404)
+        return JsonResponse({"ok": False, "erro": "Planilha atualizada não encontrada."}, status=404)
+    caminho = str(lote.arquivo_exportado)
+    if not os.path.exists(caminho):
+        caminho = os.path.join(settings.MEDIA_ROOT, caminho)
+    if not os.path.exists(caminho):
+        return JsonResponse({"ok": False, "erro": "Arquivo exportado não localizado no disco."}, status=404)
+    nome_dl = f"ATUALIZADO_{os.path.basename(lote.planilha.nome_original or 'planilha.xlsx')}"
     return FileResponse(
-        open(lote.arquivo_exportado.path, "rb"),
+        open(caminho, "rb"),
         as_attachment=True,
-        filename=f"ATUALIZADO_{lote.planilha.nome_original}",
+        filename=nome_dl,
     )
 
 

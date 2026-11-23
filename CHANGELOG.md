@@ -1,6 +1,6 @@
 # Histórico de Versões (Changelog)
 
-Registro cronológico desde o primeiro commit do repositório (12 commits).
+Registro cronológico desde o primeiro commit do repositório (13 commits).
 
 ## 1. 0bbefe2 (2026-11-23) - feat: sistema Django OCR de pedidos pronto para Vercel e WhatsApp
 - **Autor:** Willian Lira de Souza
@@ -35,6 +35,9 @@ Registro cronológico desde o primeiro commit do repositório (12 commits).
 ## 11. a54d1df (2026-11-23) - feat(planilha-feedback): adiciona retorno visual ao analisar e atualizar estrutura da planilha
 - **Autor:** Willian Lira
 
-## 12. Entrega Atual - fix(excel-preenchimento): garante gravacao na planilha, preserva mapeamento real e exibe retorno visual da estrutura
-- **Resumo:** Corrige a detecção da linha de cabeçalho e a inserção de registros no excel_service.py sem sobrescrever colunas com letras fixas, adiciona tratamento de erros explícito e retorno visual detalhado ao analisar ou salvar a estrutura da planilha.
+## 12. 12d164b (2026-11-23) - fix(excel-preenchimento): garante gravacao na planilha, preserva mapeamento real e exibe retorno visual da estrutura
+- **Autor:** Willian Lira
+
+## 13. Entrega Atual - fix(models-sync): alinha campos arquivo_original, arquivo_exportado e status_planilha nas views
+- **Resumo:** Corrige AttributeError em upload_planilha, confirmar_exportacao e baixar_planilha substituindo arquivo_modelo por arquivo_original, tratando arquivo_exportado como CharField e atualizando status_planilha/linha_inserida conforme pedidos/models.py.
 
