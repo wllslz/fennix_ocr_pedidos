@@ -1,6 +1,6 @@
 # Histórico de Versões (Changelog)
 
-Registro cronológico desde o primeiro commit do repositório (8 commits).
+Registro cronológico desde o primeiro commit do repositório (9 commits).
 
 ## 1. 0bbefe2 (2026-11-23) - feat: sistema Django OCR de pedidos pronto para Vercel e WhatsApp
 - **Autor:** Willian Lira de Souza
@@ -30,6 +30,10 @@ Registro cronológico desde o primeiro commit do repositório (8 commits).
 - **Autor:** Willian Lira de Souza
 - **Resumo:** Atualiza tratamento de requisições no OCR e documenta o fluxo de processamento de imagens.
 
-## 8. Entrega Atual - feat(ocr): requisicao unica por imagem, extracao minuciosa, botao reiniciar e docs
-- **Resumo:** Define requisição única por imagem em ocr_engine.py, refina a extração minuciosa de Total/Cliente/Pedido/Peso em field_extractor.py, adiciona destaque visual para campos vazios e botão Limpar e Reiniciar Tudo no dashboard.html, e atualiza README.md e CHANGELOG.md.
+## 8. 3009f02 (2026-11-23) - feat(ocr): requisicao unica por imagem, extracao minuciosa, botao reiniciar e docs
+- **Autor:** Willian Lira de Souza
+- **Resumo:** Define requisição única por imagem em ocr_engine.py, refina a extração minuciosa em field_extractor.py, adiciona destaque visual para campos vazios e botão Limpar e Reiniciar Tudo.
+
+## 9. Entrega Atual - fix(lote-paste): reaproveita lote_id no envio sequencial e normaliza prints colados
+- **Resumo:** Reaproveita o LoteProcessamento em processar_lote quando lote_id é enviado (garantindo exportação consolidada de todas as imagens processadas 1 a 1) e normaliza prints colados via Ctrl+V como File com extensão válida no dashboard.html.
 

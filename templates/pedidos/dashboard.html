@@ -368,15 +368,25 @@
     });
 
     document.addEventListener('paste', (e) => {
-      const items = (e.clipboardData || e.originalEvent.clipboardData).items;
+      const clip = e.clipboardData || (e.originalEvent && e.originalEvent.clipboardData);
+      if (!clip || !clip.items) return;
       const colados = [];
-      for (const item of items) {
+      let seq = 1;
+      for (const item of clip.items) {
         if (item.kind === 'file' && item.type.startsWith('image/')) {
           const blob = item.getAsFile();
-          if (blob) colados.push(blob);
+          if (blob) {
+            const ext = blob.type === 'image/jpeg' ? 'jpg' : (blob.type === 'image/webp' ? 'webp' : 'png');
+            const nomeFinal = (blob.name && /\.(jpe?g|png|webp)$/i.test(blob.name))
+              ? blob.name
+              : `print_${Date.now()}_${seq++}.${ext}`;
+            const arquivoValido = new File([blob], nomeFinal, { type: blob.type || 'image/png' });
+            colados.push(arquivoValido);
+          }
         }
       }
       if (colados.length) {
+        e.preventDefault();
         adicionarArquivosFila(colados);
       }
     });

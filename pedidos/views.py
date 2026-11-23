@@ -104,14 +104,22 @@ def processar_lote(request):
     tipo_expedicao = request.POST.get("tipo_expedicao", "LOJA").strip().upper()
     responsavel = request.POST.get("responsavel", "").strip()
 
-    lote = LoteProcessamento.objects.create(
-        planilha=planilha,
-        total_imagens=len(arquivos),
-    )
+    lote_id_req = request.POST.get("lote_id")
+    lote = LoteProcessamento.objects.filter(id=lote_id_req).first() if lote_id_req else None
+    if lote:
+        if planilha and lote.planilha_id != planilha.id:
+            lote.planilha = planilha
+        lote.total_imagens = (lote.total_imagens or 0) + len(arquivos)
+        lote.save()
+    else:
+        lote = LoteProcessamento.objects.create(
+            planilha=planilha,
+            total_imagens=len(arquivos),
+        )
 
     resultados = []
-    identificados = 0
-    pendentes = 0
+    identificados = lote.total_identificados or 0
+    pendentes = lote.total_pendentes or 0
 
     for arq in arquivos:
         try:
