@@ -36,3 +36,8 @@ source venv/Scripts/activate
 pip install -r requirements.txt
 python manage.py migrate
 python manage.py runserver
+
+## Processamento em Lote e Resiliência a Rate Limit (HTTP 429)
+
+- **Múltiplas imagens por lote:** Permite selecionar, colar (`Ctrl + V`) ou arrastar várias imagens de uma vez para a fila (`filaArquivosWhatsApp`) e enviá-las juntas em um único lote para `/processar-lote/`.
+- **Retentativa com espera (*backoff*):** Em `_ocr_cloud_api` (`pedidos/services/ocr_engine.py`), quando a API externa retorna `HTTP 429` (*Too Many Requests*) ou instabilidade temporária, o sistema aguarda (`Retry-After` ou espera progressiva) e tenta novamente automaticamente antes de registrar falha.
