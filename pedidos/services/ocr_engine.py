@@ -1,9 +1,7 @@
 import os
 import json
-import time
 import shutil
 import urllib.request
-import urllib.error
 from PIL import Image
 
 try:
@@ -21,7 +19,7 @@ except ImportError:
     HAS_TESSERACT = False
 
 
-def _ocr_cloud_api(image_path: str, max_tentativas: int = 4) -> str:
+def _ocr_cloud_api(image_path: str) -> str:
     api_key = os.environ.get("OCR_SPACE_API_KEY", "helloworld")
     boundary = "----FennixOCRBoundary7MA4YWxkTrZu0gW"
     with open(image_path, "rb") as f:
@@ -39,39 +37,19 @@ def _ocr_cloud_api(image_path: str, max_tentativas: int = 4) -> str:
         f"Content-Type: image/png\r\n\r\n"
     ).encode("utf-8") + img_data + f"\r\n--{boundary}--\r\n".encode("utf-8")
 
-    ultimo_erro = None
-    for tentativa in range(1, max_tentativas + 1):
-        req = urllib.request.Request(
-            "https://api.ocr.space/parse/image",
-            data=body,
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                "User-Agent": "FennixOCR/1.0",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=25) as resp:
-                res = json.loads(resp.read().decode("utf-8"))
-            parsed = res.get("ParsedResults") or []
-            return "\n".join(item.get("ParsedText", "") for item in parsed)
-        except urllib.error.HTTPError as e:
-            ultimo_erro = e
-            if e.code == 429 and tentativa < max_tentativas:
-                retry_after = e.headers.get("Retry-After") if e.headers else None
-                espera = float(retry_after) if retry_after and retry_after.isdigit() else (2.5 * tentativa)
-                time.sleep(min(espera, 12.0))
-                continue
-            raise
-        except Exception as e:
-            ultimo_erro = e
-            if tentativa < max_tentativas:
-                time.sleep(1.5 * tentativa)
-                continue
-            raise
+    req = urllib.request.Request(
+        "https://api.ocr.space/parse/image",
+        data=body,
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": "FennixOCR/1.0",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=25) as resp:
+        res = json.loads(resp.read().decode("utf-8"))
 
-    if ultimo_erro:
-        raise ultimo_erro
-    return ""
+    parsed = res.get("ParsedResults") or []
+    return "\n".join(item.get("ParsedText", "") for item in parsed)
 
 
 def executar_ocr(imagens_prep: dict) -> dict:

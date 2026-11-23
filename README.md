@@ -1,43 +1,52 @@
-# Fennix OCR Pedidos — Extração de Pedidos por OCR, Análise de Planilhas e Exportação
+# Fennix OCR Pedidos
 
-Aplicação web em **Django** para a rotina de expedição e monitoramento de pedidos, combinando leitura automatizada de comprovantes/imagens via **OCR**, análise estrutural de planilhas `.xlsx` com **OpenPyXL**, revisão humana e exportação consolidada.
+Sistema web em **Django** para leitura de comprovantes de pedidos via OCR, mapeamento de planilhas `.xlsx` com **OpenPyXL**, conferência manual e exportação consolidada.
 
-## Porquê o Sistema Foi Criado
+## Contexto e Objetivo
 
-Na rotina operacional de expedição e acompanhamento de pedidos, comprovantes, telas de pedido e resumos chegam frequentemente por imagem (fotos ou prints enviados pelo WhatsApp). Transcrever esses dados manualmente para a planilha e conferir onde cada informação deve entrar traz gargalos práticos:
+Na rotina de expedição, comprovantes e telas de pedidos chegam em formato de imagem (fotos e capturas de tela). O sistema resolve três problemas operacionais:
 
-- **Retrabalho e erro humano:** Digitar manualmente número de cliente, número de pedido, peso e valor total de vários pedidos em sequência toma tempo e favorece trocas de dígitos ou separadores decimais.
-- **Variação de estrutura entre planilhas:** Planilhas `.xlsx` nem sempre têm cabeçalho na linha 1 ou mantêm as colunas sempre nas mesmas letras; depender de posições fixas sem analisar a estrutura pode inserir dados em colunas ou abas erradas.
-- **Conferência humana antes da gravação:** A leitura por OCR agiliza o preenchimento, mas o conferente precisa revisar, corrigir se necessário e aprovar os registros antes de alterar ou exportar a planilha.
+1. **Transcrição manual:** Substitui a digitação repetitiva de `Cliente`, `Pedido`, `Peso (Kg)` e `Total (R$)` por leitura automática com revisão antes da gravação.
+2. **Diferenças entre planilhas:** Inspeciona abas e cabeçalhos dinamicamente em arquivos `.xlsx` em vez de depender de colunas fixas.
+3. **Controle de requisições:** Executa apenas uma requisição de OCR por imagem, processando uma imagem por vez para evitar sobrecarga e facilitar a conferência item a item.
 
-## Como Foi Construído e Decisões de Engenharia
+## Funcionalidades Principais
 
-- **Backend Django (`pedidos/`):** Estruturado com modelos (`PlanilhaModelo`, `LoteProcessamento`, `PedidoExtraido`), formulários e validadores (`forms.py`), views HTTP/AJAX (`views.py`) e painel web (`templates/pedidos/dashboard.html`).
-- **Análise e escrita com OpenPyXL (`pedidos/services/excel_service.py`):** Carrega o arquivo `.xlsx`, normaliza cabeçalhos removendo acentos e espaços (`normalizar_texto`), pontua linhas candidatas a cabeçalho, mapeia sinônimos (`ALIASES_CAMPOS`) para letras de coluna (`get_column_letter`), identifica linhas ocupadas ou vagas pré-datadas, gera backup antes da gravação e insere os pedidos aprovados.
-- **Pipeline de imagem, OCR e extração (`image_processor.py`, `ocr_engine.py`, `field_extractor.py`):** Pré-processa a imagem recebida, executa o OCR e extrai/padroniza números e valores decimais no formato brasileiro (`parse_decimal_br`).
+- **Análise estrutural de planilhas (`.xlsx`):** Valida extensão, tamanho (até 25 MB) e assinatura `PK\x03\x04`, identifica a linha de cabeçalho, sugere a aba de destino (priorizando `BASE`) e mapeia as colunas (`cliente`, `pedido`, `peso`, `total`, `data`, `mes`, `tipo_expedicao`, `status_separacao` e `responsavel`).
+- **Mapeamento ajustável:** Permite revisar e salvar a aba de destino e as letras das colunas antes da exportação.
+- **Leitura OCR individual e verificação minuciosa:** Processa uma imagem por vez com requisição única, extrai os campos principais (incluindo valores totais com quebra de linha ou formatos decimais variados) e destaca visualmente em vermelho qualquer campo vazio que exija revisão.
+- **Conferência, reinício rápido e exportação:** Permite editar valores na tabela, limpar todos os dados da tela pelo botão **Limpar e Reiniciar Tudo** e gerar a planilha `.xlsx` atualizada com os pedidos aprovados.
 
-## O Que o Aplicativo Faz
+## Estrutura do Projeto
 
-1. **Upload e análise estrutural de planilhas (`.xlsx`):** Valida extensão, tamanho e assinatura `PK\x03\x04`, varre abas, identifica a linha do cabeçalho e mapeia colunas (`cliente`, `pedido`, `peso`, `total`, `data`, `mes`, `tipo_expedicao`, `status_separacao`, `responsavel`), priorizando a aba `BASE` quando disponível.
-2. **Ajuste de mapeamento:** Permite conferir e atualizar a aba de destino e as letras das colunas no painel.
-3. **Processamento em lote de imagens:** Valida imagens (`JPG`, `PNG`, `WEBP`), executa OCR por item e classifica o status (`OK`, pendente ou `ERRO`) com texto bruto e observações.
-4. **Revisão e exportação da planilha:** Permite editar campos extraídos, aprovar registros e gerar a planilha `.xlsx` atualizada.
+```text
+fennix_ocr_pedidos/
+├── fennix_ocr_pedidos/          # Configurações principais do projeto Django
+├── pedidos/
+│   ├── models.py                # PlanilhaModelo, LoteProcessamento e PedidoExtraido
+│   ├── forms.py                 # Validação de planilhas .xlsx e imagens
+│   ├── views.py                 # Rotas de upload, mapeamento, OCR e exportação
+│   └── services/
+│       ├── image_processor.py   # Tratamento prévio das imagens
+│       ├── ocr_engine.py        # Execução via Tesseract local ou API OCR (requisição única)
+│       ├── field_extractor.py   # Extração e validação de Cliente, Pedido, Peso e Total
+│       └── excel_service.py     # Inspeção e gravação em planilhas com OpenPyXL
+├── templates/pedidos/
+│   └── dashboard.html           # Painel operacional de conferência
+├── CHANGELOG.md                 # Histórico completo de commits do repositório
+└── README.md
 
-## Arquitetura, Segurança e Execução
+## Validações e Segurança
 
-- **Fluxo:** `dashboard.html` -> `POST /upload-planilha/` (`analisar_estrutura_planilha`) -> `POST /atualizar-mapeamento/` -> `POST /processar-lote/` (`OCR` + `field_extractor`) -> `POST /confirmar-exportacao/` (`inserir_pedidos_na_planilha`).
-- **Segurança:** Validação de extensão, tamanho e *magic bytes*, sanitização de nomes de arquivo com `os.path.basename`, validação de letras de coluna (`^[A-Z]{1,3}$`) e respostas JSON seguras (`400` em JSON inválido e `lerJsonSeguro` no frontend).
-- **Histórico completo:** Veja [`CHANGELOG.md`](./CHANGELOG.md) com todos os commits desde o início do repositório.
+- **Verificação de arquivos:** Checagem de extensão, limite de tamanho e assinatura binária (magic bytes) para arquivos .xlsx, JPG, PNG e WEBP.
+- **Proteção de caminhos e parâmetros:** Sanitização de nomes de arquivos com os.path.basename e validação de letras de coluna com regex ^[A-Z]{1,3}$.
+- **Tratamento de respostas HTTP:** Validação de JSON no backend (HTTP 400 para payload inválido) e leitura segura de respostas no frontend (lerJsonSeguro).
 
-```bash
-cd fennix_ocr_pedidos
-python -m venv venv
-source venv/Scripts/activate
-pip install -r requirements.txt
-python manage.py migrate
-python manage.py runserver
+## Execução Local
 
-## Processamento em Lote e Resiliência a Rate Limit (HTTP 429)
+1. Clone o repositório e acesse a pasta fennix_ocr_pedidos.
+2. Crie e ative o ambiente virtual Python (venv).
+3. Instale as dependências com pip install -r requirements.txt.
+4. Execute python manage.py migrate e inicie com python manage.py runserver.
 
-- **Múltiplas imagens por lote:** Permite selecionar, colar (`Ctrl + V`) ou arrastar várias imagens de uma vez para a fila (`filaArquivosWhatsApp`) e enviá-las juntas em um único lote para `/processar-lote/`.
-- **Retentativa com espera (*backoff*):** Em `_ocr_cloud_api` (`pedidos/services/ocr_engine.py`), quando a API externa retorna `HTTP 429` (*Too Many Requests*) ou instabilidade temporária, o sistema aguarda (`Retry-After` ou espera progressiva) e tenta novamente automaticamente antes de registrar falha.
+O histórico completo de versões está registrado em CHANGELOG.md.
