@@ -332,6 +332,7 @@
         document.getElementById('mapPedido').value = data.mapeamento.pedido || '';
         document.getElementById('mapPeso').value = data.mapeamento.peso || '';
         document.getElementById('mapTotal').value = data.mapeamento.total || '';
+        inp.value = '';
         exibirFeedbackEstrutura(data.mensagem || `Estrutura analisada: aba ${data.aba_destino}.`, true);
       } finally {
         btn.disabled = false;
@@ -432,6 +433,13 @@
       }
       atualizarContadorFila();
     }
+
+    document.getElementById('inpPlanilha').addEventListener('change', () => {
+      const inp = document.getElementById('inpPlanilha');
+      if (inp && inp.files && inp.files.length) {
+        enviarPlanilha();
+      }
+    });
 
     document.getElementById('inpImagens').addEventListener('change', (e) => {
       adicionarArquivosFila(e.target.files);

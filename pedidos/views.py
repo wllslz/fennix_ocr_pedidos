@@ -56,7 +56,7 @@ def _obter_ou_criar_planilha_padrao(planilha_id=None):
 
 
 def dashboard(request):
-    planilha = _obter_ou_criar_planilha_padrao()
+    planilha = PlanilhaModelo.objects.order_by('-id').first() or _obter_ou_criar_planilha_padrao()
     lote = LoteProcessamento.objects.filter(planilha=planilha).first() if planilha else None
     pedidos = lote.pedidos.all() if lote else []
     return render(
@@ -104,7 +104,8 @@ def upload_planilha(request):
             "aba_destino": info["aba_destino"],
             "linha_cabecalho": info.get("linha_cabecalho"),
             "mapeamento": m,
-            "mensagem": f"Estrutura analisada na aba '{info['aba_destino']}' (cabeçalho na linha {info.get('linha_cabecalho') or 1}). Colunas -> {resumo_cols}",
+            "ultima_linha_dados": info.get("ultima_linha_dados"),
+        "mensagem": f"Planilha '{planilha.nome_original}' carregada! Aba '{info['aba_destino']}', última linha preenchida: {info.get('ultima_linha_dados') or 1}. Colunas -> {resumo_cols}",
         })
     except Exception as e:
         planilha.delete()
@@ -146,7 +147,23 @@ def atualizar_mapeamento(request):
 
 @require_POST
 def processar_lote(request):
-    planilha = _obter_ou_criar_planilha_padrao(request.POST.get("planilha_id"))
+    if "planilha" in request.FILES:
+        form_pl = PlanilhaUploadForm(request.POST, request.FILES)
+        if not form_pl.is_valid():
+            erros = "; ".join(sum(form_pl.errors.values(), []))
+            return JsonResponse({"ok": False, "erro": erros}, status=400)
+        arq_pl = form_pl.cleaned_data["planilha"]
+        planilha = PlanilhaModelo.objects.create(
+            nome_original=arq_pl.name,
+            arquivo_original=arq_pl,
+        )
+        info = analisar_estrutura_planilha(planilha.arquivo_original.path)
+        planilha.aba_destino = info["aba_destino"]
+        planilha.mapeamento_colunas = info["mapeamento"]
+        planilha.metadados_estrutura = info
+        planilha.save()
+    else:
+        planilha = _obter_ou_criar_planilha_padrao(request.POST.get("planilha_id"))
     arquivos = request.FILES.getlist("imagens")
     if not arquivos:
         return JsonResponse({"ok": False, "erro": "Envie ao menos uma imagem de pedido."}, status=400)
@@ -226,6 +243,7 @@ def processar_lote(request):
 
     return JsonResponse({
         "ok": True,
+        "planilha_id": planilha.id,
         "lote_id": lote.id,
         "resumo": {
             "total_imagens": lote.total_imagens,

@@ -71,38 +71,28 @@ def analisar_estrutura_planilha(caminho_xlsx: str) -> dict:
                     mapeamento[campo_logico] = info["col_letter"]
                     break
 
-        ultima_linha_dados = linha_cabecalho
-        linhas_vagas_pre_datadas = []
-        col_pedido_idx = None
-        col_cliente_idx = None
-        for c_idx, info in colunas.items():
-            if info["col_letter"] == mapeamento.get("pedido"):
-                col_pedido_idx = c_idx
-            if info["col_letter"] == mapeamento.get("cliente"):
-                col_cliente_idx = c_idx
+        cols_dados = [
+            col_idx for col_idx, info in colunas.items()
+            if info["col_letter"] in (
+                mapeamento.get("cliente"),
+                mapeamento.get("pedido"),
+                mapeamento.get("peso"),
+                mapeamento.get("total"),
+            )
+        ] or list(colunas.keys())
 
+        ultima_linha_dados = linha_cabecalho
         limite_busca = min(ws.max_row, 50000)
-        linhas_vazias_seguidas = 0
         for r in range(linha_cabecalho + 1, limite_busca + 1):
-            vals = [ws.cell(r, c).value for c in colunas.keys()]
+            vals = [ws.cell(r, c).value for c in cols_dados]
             if any(v is not None and str(v).strip() != "" for v in vals):
                 ultima_linha_dados = r
-                linhas_vazias_seguidas = 0
-                ped_v = ws.cell(r, col_pedido_idx).value if col_pedido_idx else None
-                cli_v = ws.cell(r, col_cliente_idx).value if col_cliente_idx else None
-                if (ped_v is None or str(ped_v).strip() == "") and (cli_v is None or str(cli_v).strip() == ""):
-                    linhas_vagas_pre_datadas.append(r)
-            else:
-                linhas_vazias_seguidas += 1
-                if linhas_vazias_seguidas > 50:
-                    break
 
         abas_info[nome_aba] = {
             "linha_cabecalho": linha_cabecalho,
             "colunas": list(colunas.values()),
             "mapeamento": mapeamento,
             "ultima_linha_dados": ultima_linha_dados,
-            "linhas_vagas_pre_datadas": linhas_vagas_pre_datadas,
             "tabelas": list(ws.tables.keys()),
         }
 
@@ -125,8 +115,8 @@ def analisar_estrutura_planilha(caminho_xlsx: str) -> dict:
         "aba_selecionada": aba_padrao,
         "mapeamento": abas_info.get(aba_padrao, {}).get("mapeamento", {}),
         "linha_cabecalho": abas_info.get(aba_padrao, {}).get("linha_cabecalho") or 1,
+        "ultima_linha_dados": abas_info.get(aba_padrao, {}).get("ultima_linha_dados") or 1,
         "detalhes_abas": abas_info,
-        "aviso_slicer": "Planilha analisada com sucesso.",
     }
 
 
@@ -214,23 +204,20 @@ def inserir_pedidos_na_planilha(
     col_status = _col_idx_seguro(map_efetivo.get("status_separacao"))
     col_resp = _col_idx_seguro(map_efetivo.get("responsavel"))
 
-    cols_monitoradas = [
-        c for c in (col_cliente, col_pedido, col_peso, col_total)
-        if c is not None
-    ] or [
-        c for c in (col_data, col_mes, col_tipo, col_status, col_resp)
+    cols_principais = [c for c in (col_cliente, col_pedido, col_peso, col_total) if c is not None]
+    cols_todas = [
+        c for c in (col_cliente, col_pedido, col_peso, col_total, col_data, col_mes, col_tipo, col_status, col_resp)
         if c is not None
     ]
-    if not cols_monitoradas:
-        cols_monitoradas = list(range(1, min(13, ws.max_column + 1)))
+    cols_busca = cols_principais or cols_todas or list(range(1, min(13, ws.max_column + 1)))
 
     pedidos_existentes = set()
     ultima_linha_com_dados = linha_cabecalho
     limite_real = min(ws.max_row, 50000)
 
-    # Varre todas as linhas até o fim real da aba para encontrar a última linha preenchida
+    # Percorre toda a planilha enviada até o final para localizar exatamente a última linha preenchida
     for r in range(linha_cabecalho + 1, limite_real + 1):
-        row_vals = [ws.cell(r, c).value for c in cols_monitoradas]
+        row_vals = [ws.cell(r, c).value for c in cols_busca]
         if any(v is not None and str(v).strip() != "" for v in row_vals):
             ultima_linha_com_dados = r
             ped_val = ws.cell(r, col_pedido).value if col_pedido else None
@@ -239,7 +226,7 @@ def inserir_pedidos_na_planilha(
 
     linha_modelo_estilo = ultima_linha_com_dados if ultima_linha_com_dados > linha_cabecalho else 0
     proxima_linha_nova = ultima_linha_com_dados + 1
-    max_col_estilo = max([ws.max_column] + cols_monitoradas)
+    max_col_estilo = max([ws.max_column] + cols_busca)
     hoje_dt = datetime.combine(date.today(), datetime.min.time())
     mes_atual_pt = MESES_PT[date.today().month]
 
@@ -265,7 +252,7 @@ def inserir_pedidos_na_planilha(
             duplicados_ignorados.append(ped_str)
             continue
 
-        # Sempre preenche estritamente a partir da última linha preenchida
+        # Insere estritamente na linha abaixo da última linha preenchida
         target_row = proxima_linha_nova
         proxima_linha_nova += 1
         if linha_modelo_estilo > linha_cabecalho:
@@ -303,7 +290,9 @@ def inserir_pedidos_na_planilha(
 
     ultima_final = max(ultima_linha_com_dados, proxima_linha_nova - 1)
     if "Tabela1" in ws.tables:
-        ws.tables["Tabela1"].ref = f"A{linha_cabecalho}:L{ultima_final}"
+        ref_atual = ws.tables["Tabela1"].ref
+        col_fim = ref_atual.split(":")[1].rstrip("0123456789") if ":" in ref_atual else "L"
+        ws.tables["Tabela1"].ref = f"A{linha_cabecalho}:{col_fim}{ultima_final}"
 
     os.makedirs(os.path.dirname(caminho_saida), exist_ok=True)
     wb.save(caminho_saida)
@@ -313,5 +302,6 @@ def inserir_pedidos_na_planilha(
         "duplicados": duplicados_ignorados,
         "arquivo_saida": caminho_saida,
         "aba_utilizada": aba_real,
+        "ultima_linha_anterior": ultima_linha_com_dados,
         "mapeamento_utilizado": map_efetivo,
     }
