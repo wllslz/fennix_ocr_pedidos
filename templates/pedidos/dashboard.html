@@ -182,6 +182,16 @@
               <input type="text" id="mapTotal" value="{% if planilha %}{{ planilha.mapeamento_colunas.total }}{% endif %}" />
             </div>
           </div>
+          <div style="display:flex; gap:8px; align-items:end; margin-top:10px;">
+            <div style="flex:1;">
+              <label>Aba de Destino</label>
+              <input type="text" id="inpAbaDestino" value="{% if planilha %}{{ planilha.aba_destino }}{% else %}BASE{% endif %}" placeholder="Ex: BASE" />
+            </div>
+            <button type="button" id="btnSalvarEstrutura" class="btn" style="width:auto; margin-top:0; background:#0f2544; color:#fff;" onclick="salvarEstruturaPlanilha()">
+              Salvar Estrutura Atualizada
+            </button>
+          </div>
+          <div id="feedbackEstruturaPlanilha" style="display:none; margin-top:10px; padding:10px 12px; border-radius:8px; font-size:0.82rem; font-weight:600;"></div>
         </div>
       </div>
 
@@ -311,13 +321,69 @@
         document.getElementById('infoPlanilha').style.display = 'block';
         document.getElementById('lblNomePlanilha').textContent = data.nome;
         document.getElementById('lblAbaDestino').textContent = data.aba_destino;
+        const inpAba = document.getElementById('inpAbaDestino');
+        if (inpAba) inpAba.value = data.aba_destino || 'BASE';
         document.getElementById('mapCliente').value = data.mapeamento.cliente || '';
         document.getElementById('mapPedido').value = data.mapeamento.pedido || '';
         document.getElementById('mapPeso').value = data.mapeamento.peso || '';
         document.getElementById('mapTotal').value = data.mapeamento.total || '';
+        exibirFeedbackEstrutura(data.mensagem || `Estrutura analisada: aba ${data.aba_destino}.`, true);
       } finally {
         btn.disabled = false;
         btn.textContent = 'Analisar Estrutura da Planilha';
+      }
+    }
+
+    function exibirFeedbackEstrutura(texto, sucesso = true) {
+      const box = document.getElementById('feedbackEstruturaPlanilha');
+      if (!box) return;
+      const hora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      box.style.display = 'block';
+      box.style.background = sucesso ? '#ecfdf5' : '#fef2f2';
+      box.style.border = sucesso ? '1px solid #10b981' : '1px solid #ef4444';
+      box.style.color = sucesso ? '#065f46' : '#991b1b';
+      box.textContent = `[${hora}] ${texto}`;
+    }
+
+    async function salvarEstruturaPlanilha() {
+      const btn = document.getElementById('btnSalvarEstrutura');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Salvando...';
+      }
+      const aba = (document.getElementById('inpAbaDestino')?.value || document.getElementById('lblAbaDestino')?.textContent || 'BASE').trim();
+      const mapeamento = {
+        cliente: document.getElementById('mapCliente').value.trim().toUpperCase(),
+        pedido: document.getElementById('mapPedido').value.trim().toUpperCase(),
+        peso: document.getElementById('mapPeso').value.trim().toUpperCase(),
+        total: document.getElementById('mapTotal').value.trim().toUpperCase(),
+        data: 'A', mes: 'B', tipo_expedicao: 'H', status_separacao: 'I', responsavel: 'L'
+      };
+      try {
+        const resp = await fetch('/atualizar-mapeamento/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+          body: JSON.stringify({
+            planilha_id: planilhaIdAtual,
+            aba_destino: aba,
+            mapeamento
+          })
+        });
+        const data = await resp.json();
+        if (!data.ok) {
+          exibirFeedbackEstrutura(data.erro || 'Não foi possível atualizar a estrutura.', false);
+          return;
+        }
+        planilhaIdAtual = data.planilha_id || planilhaIdAtual;
+        document.getElementById('lblAbaDestino').textContent = data.aba_destino;
+        exibirFeedbackEstrutura(data.mensagem || 'Estrutura da planilha atualizada com sucesso.', true);
+      } catch (err) {
+        exibirFeedbackEstrutura(`Erro de comunicação ao atualizar estrutura: ${err}`, false);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = 'Salvar Estrutura Atualizada';
+        }
       }
     }
 

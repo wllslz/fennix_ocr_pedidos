@@ -71,13 +71,17 @@ def upload_planilha(request):
     planilha.mapeamento_colunas = info["mapeamento"]
     planilha.save()
 
+    m = info["mapeamento"] or {}
+    resumo_cols = f"Cliente: {m.get('cliente') or '-'} | Pedido: {m.get('pedido') or '-'} | Peso: {m.get('peso') or '-'} | Total: {m.get('total') or '-'}"
     return JsonResponse({
         "ok": True,
         "planilha_id": planilha.id,
         "nome": planilha.nome_original,
         "abas": info["abas"],
         "aba_destino": info["aba_destino"],
-        "mapeamento": info["mapeamento"],
+        "linha_cabecalho": info.get("linha_cabecalho"),
+        "mapeamento": m,
+        "mensagem": f"Estrutura analisada na aba '{info['aba_destino']}' (cabeçalho na linha {info.get('linha_cabecalho') or '?'}). Colunas -> {resumo_cols}",
     })
 
 
@@ -88,10 +92,19 @@ def atualizar_mapeamento(request):
     except Exception:
         return JsonResponse({"ok": False, "erro": "JSON inválido."}, status=400)
     planilha = _obter_ou_criar_planilha_padrao(data.get("planilha_id"))
-    planilha.aba_destino = data.get("aba_destino", planilha.aba_destino)
-    planilha.mapeamento_colunas = data.get("mapeamento", planilha.mapeamento_colunas)
+    nova_aba = str(data.get("aba_destino") or planilha.aba_destino or "BASE").strip()
+    novo_map = data.get("mapeamento") or planilha.mapeamento_colunas or {}
+    planilha.aba_destino = nova_aba
+    planilha.mapeamento_colunas = novo_map
     planilha.save()
-    return JsonResponse({"ok": True})
+    resumo_cols = f"Cliente: {novo_map.get('cliente') or '-'} | Pedido: {novo_map.get('pedido') or '-'} | Peso: {novo_map.get('peso') or '-'} | Total: {novo_map.get('total') or '-'}"
+    return JsonResponse({
+        "ok": True,
+        "planilha_id": planilha.id,
+        "aba_destino": planilha.aba_destino,
+        "mapeamento": planilha.mapeamento_colunas,
+        "mensagem": f"Estrutura atualizada com sucesso na aba '{planilha.aba_destino}'. Colunas -> {resumo_cols}",
+    })
 
 
 @require_POST
