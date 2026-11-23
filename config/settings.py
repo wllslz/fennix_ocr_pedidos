@@ -69,6 +69,14 @@ DATA_UPLOAD_MAX_NUMBER_FILES = 300
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+
+ALLOWED_HOSTS = ["*"]
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.vercel.app",
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+]
+
 IS_VERCEL = os.environ.get("VERCEL") == "1"
 if IS_VERCEL:
     DATABASES["default"]["NAME"] = "/tmp/db.sqlite3"

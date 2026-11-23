@@ -56,7 +56,7 @@ def analisar_estrutura_planilha(caminho_xlsx: str) -> dict:
                         "number_format": ws.cell(r, c).number_format,
                     }
             norms = {v["header_norm"] for v in encontrados.values()}
-            if any("pedido" in n for n in norms) and any("cliente" in n for n in norms):
+            if any(any(k in n for k in ("pedido", "cliente", "peso", "valor", "total")) for n in norms):
                 linha_cabecalho = r
                 colunas = encontrados
                 break
@@ -121,7 +121,10 @@ def analisar_estrutura_planilha(caminho_xlsx: str) -> dict:
 
     return {
         "abas": wb.sheetnames,
+        "aba_destino": aba_padrao,
         "aba_selecionada": aba_padrao,
+        "mapeamento": abas_info.get(aba_padrao, {}).get("mapeamento", {}) if aba_padrao else {},
+        "linha_cabecalho": abas_info.get(aba_padrao, {}).get("linha_cabecalho") if aba_padrao else None,
         "detalhes_abas": abas_info,
         "aviso_slicer": "Planilha analisada com sucesso. Slicers visuais do Excel são removidos pelo OpenPyXL, mantendo 100% dos dados, fórmulas e formatações.",
     }
@@ -242,7 +245,7 @@ def inserir_pedidos_na_planilha(
         total_val = item.get("valor_total")
         if total_val is not None and total_val != "":
             ws.cell(target_row, col_total).value = float(Decimal(str(total_val)))
-            ws.cell(target_row, col_total).number_format = '_-"R$"\ * #,##0.00_-;\-"R$"\ * #,##0.00_-;_-"R$"\ * "-"??_-;_-@_-'
+            ws.cell(target_row, col_total).number_format = r'_-"R$"\ * #,##0.00_-;\-"R$"\ * #,##0.00_-;_-"R$"\ * "-"??_-;_-@_-'
 
         if col_tipo and item.get("tipo_expedicao"):
             ws.cell(target_row, col_tipo).value = str(item["tipo_expedicao"]).strip().upper()
