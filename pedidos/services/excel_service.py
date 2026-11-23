@@ -43,9 +43,9 @@ def analisar_estrutura_planilha(caminho_xlsx: str) -> dict:
         linha_cabecalho = None
         colunas = {}
 
-        for r in range(1, min(21, ws.max_row + 1)):
+        for r in range(1, min(25, ws.max_row + 1)):
             encontrados = {}
-            for c in range(1, min(30, ws.max_column + 1)):
+            for c in range(1, min(35, ws.max_column + 1)):
                 val = ws.cell(r, c).value
                 if val is not None and str(val).strip():
                     encontrados[c] = {
@@ -85,12 +85,12 @@ def analisar_estrutura_planilha(caminho_xlsx: str) -> dict:
         linhas_vazias_seguidas = 0
         for r in range(linha_cabecalho + 1, limite_busca + 1):
             vals = [ws.cell(r, c).value for c in colunas.keys()]
-            if any(v is not None for v in vals):
+            if any(v is not None and str(v).strip() != "" for v in vals):
                 ultima_linha_dados = r
                 linhas_vazias_seguidas = 0
                 ped_v = ws.cell(r, col_pedido_idx).value if col_pedido_idx else None
                 cli_v = ws.cell(r, col_cliente_idx).value if col_cliente_idx else None
-                if ped_v is None and cli_v is None:
+                if (ped_v is None or str(ped_v).strip() == "") and (cli_v is None or str(cli_v).strip() == ""):
                     linhas_vagas_pre_datadas.append(r)
             else:
                 linhas_vazias_seguidas += 1
@@ -109,24 +109,24 @@ def analisar_estrutura_planilha(caminho_xlsx: str) -> dict:
     aba_padrao = None
     for nome_aba, info in abas_info.items():
         m = info["mapeamento"]
-        if all(k in m for k in ("cliente", "pedido", "peso", "total")):
+        if any(k in m for k in ("cliente", "pedido", "peso", "total")):
             if nome_aba.strip().upper() == "BASE":
                 aba_padrao = nome_aba
                 break
             if aba_padrao is None:
                 aba_padrao = nome_aba
 
-    if aba_padrao is None and abas_info:
-        aba_padrao = next(iter(abas_info.keys()))
+    if aba_padrao is None:
+        aba_padrao = wb.sheetnames[0] if wb.sheetnames else "BASE"
 
     return {
         "abas": wb.sheetnames,
         "aba_destino": aba_padrao,
         "aba_selecionada": aba_padrao,
-        "mapeamento": abas_info.get(aba_padrao, {}).get("mapeamento", {}) if aba_padrao else {},
-        "linha_cabecalho": abas_info.get(aba_padrao, {}).get("linha_cabecalho") if aba_padrao else None,
+        "mapeamento": abas_info.get(aba_padrao, {}).get("mapeamento", {}),
+        "linha_cabecalho": abas_info.get(aba_padrao, {}).get("linha_cabecalho") or 1,
         "detalhes_abas": abas_info,
-        "aviso_slicer": "Planilha analisada com sucesso. Slicers visuais do Excel são removidos pelo OpenPyXL, mantendo 100% dos dados, fórmulas e formatações.",
+        "aviso_slicer": "Planilha analisada com sucesso.",
     }
 
 
@@ -140,6 +140,8 @@ def criar_backup_planilha(caminho_origem: str, pasta_backups: str) -> str:
 
 
 def _copiar_estilo_linha(ws, linha_origem: int, linha_destino: int, max_col: int):
+    if linha_origem < 1:
+        return
     for c in range(1, max_col + 1):
         src = ws.cell(linha_origem, c)
         dst = ws.cell(linha_destino, c)
@@ -160,6 +162,16 @@ def _converter_identificador(valor_str: str):
     return s
 
 
+def _col_idx_seguro(letra: str):
+    s = str(letra or "").strip().upper()
+    if not s:
+        return None
+    try:
+        return openpyxl.utils.column_index_from_string(s)
+    except Exception:
+        return None
+
+
 def inserir_pedidos_na_planilha(
     caminho_base: str,
     caminho_saida: str,
@@ -167,45 +179,69 @@ def inserir_pedidos_na_planilha(
     mapeamento: dict,
     pedidos_aprovados: list[dict],
 ) -> dict:
+    info_estrutura = analisar_estrutura_planilha(caminho_base)
     wb = openpyxl.load_workbook(caminho_base, data_only=False)
-    if aba_destino not in wb.sheetnames:
-        raise ValueError(f"Aba '{aba_destino}' não encontrada na planilha.")
 
-    ws = wb[aba_destino]
-    col_cliente = openpyxl.utils.column_index_from_string(mapeamento["cliente"])
-    col_pedido = openpyxl.utils.column_index_from_string(mapeamento["pedido"])
-    col_peso = openpyxl.utils.column_index_from_string(mapeamento["peso"])
-    col_total = openpyxl.utils.column_index_from_string(mapeamento["total"])
+    aba_real = aba_destino if aba_destino in wb.sheetnames else None
+    if not aba_real:
+        for sname in wb.sheetnames:
+            if sname.strip().lower() == str(aba_destino or "").strip().lower():
+                aba_real = sname
+                break
+    if not aba_real:
+        aba_real = info_estrutura.get("aba_destino") or wb.sheetnames[0]
 
-    col_data = openpyxl.utils.column_index_from_string(mapeamento["data"]) if mapeamento.get("data") else None
-    col_mes = openpyxl.utils.column_index_from_string(mapeamento["mes"]) if mapeamento.get("mes") else None
-    col_tipo = openpyxl.utils.column_index_from_string(mapeamento["tipo_expedicao"]) if mapeamento.get("tipo_expedicao") else None
-    col_status = openpyxl.utils.column_index_from_string(mapeamento["status_separacao"]) if mapeamento.get("status_separacao") else None
-    col_resp = openpyxl.utils.column_index_from_string(mapeamento["responsavel"]) if mapeamento.get("responsavel") else None
+    ws = wb[aba_real]
+    detalhes_aba = info_estrutura.get("detalhes_abas", {}).get(aba_real, {})
+    linha_cabecalho = detalhes_aba.get("linha_cabecalho") or 1
+
+    map_efetivo = dict(detalhes_aba.get("mapeamento") or {})
+    for k, v in (mapeamento or {}).items():
+        if v and str(v).strip():
+            map_efetivo[k] = str(v).strip().upper()
+
+    col_cliente = _col_idx_seguro(map_efetivo.get("cliente"))
+    col_pedido = _col_idx_seguro(map_efetivo.get("pedido"))
+    col_peso = _col_idx_seguro(map_efetivo.get("peso"))
+    col_total = _col_idx_seguro(map_efetivo.get("total"))
+
+    col_data = _col_idx_seguro(map_efetivo.get("data"))
+    col_mes = _col_idx_seguro(map_efetivo.get("mes"))
+    col_tipo = _col_idx_seguro(map_efetivo.get("tipo_expedicao"))
+    col_status = _col_idx_seguro(map_efetivo.get("status_separacao"))
+    col_resp = _col_idx_seguro(map_efetivo.get("responsavel"))
+
+    cols_monitoradas = [
+        c for c in (col_cliente, col_pedido, col_peso, col_total, col_data, col_mes, col_tipo, col_status, col_resp)
+        if c is not None
+    ]
+    if not cols_monitoradas:
+        cols_monitoradas = list(range(1, min(13, ws.max_column + 1)))
 
     pedidos_existentes = set()
-    ultima_linha_com_algo = 1
+    ultima_linha_com_dados = linha_cabecalho
     linhas_vagas_disponiveis = []
     linhas_vazias_seguidas = 0
 
-    for r in range(2, min(ws.max_row + 1, 50000)):
-        row_vals = [ws.cell(r, c).value for c in range(1, 13)]
-        if any(v is not None for v in row_vals):
-            ultima_linha_com_algo = r
+    for r in range(linha_cabecalho + 1, min(ws.max_row + 1, 50000)):
+        row_vals = [ws.cell(r, c).value for c in cols_monitoradas]
+        if any(v is not None and str(v).strip() != "" for v in row_vals):
+            ultima_linha_com_dados = r
             linhas_vazias_seguidas = 0
-            ped_val = ws.cell(r, col_pedido).value
-            cli_val = ws.cell(r, col_cliente).value
-            if ped_val is not None:
+            ped_val = ws.cell(r, col_pedido).value if col_pedido else None
+            cli_val = ws.cell(r, col_cliente).value if col_cliente else None
+            if ped_val is not None and str(ped_val).strip() != "":
                 pedidos_existentes.add(str(ped_val).strip())
-            elif cli_val is None:
+            elif (cli_val is None or str(cli_val).strip() == "") and (col_pedido or col_cliente):
                 linhas_vagas_disponiveis.append(r)
         else:
             linhas_vazias_seguidas += 1
             if linhas_vazias_seguidas > 50:
                 break
 
-    linha_modelo_estilo = max(2, ultima_linha_com_algo)
-    proxima_linha_nova = ultima_linha_com_algo + 1
+    linha_modelo_estilo = ultima_linha_com_dados if ultima_linha_com_dados > linha_cabecalho else 0
+    proxima_linha_nova = ultima_linha_com_dados + 1
+    max_col_estilo = max([ws.max_column] + cols_monitoradas)
     hoje_dt = datetime.combine(date.today(), datetime.min.time())
     mes_atual_pt = MESES_PT[date.today().month]
 
@@ -213,10 +249,21 @@ def inserir_pedidos_na_planilha(
     duplicados_ignorados = []
 
     for item in pedidos_aprovados:
-        ped_str = str(item.get("numero_pedido", "")).strip()
-        if not ped_str:
+        ped_str = str(item.get("numero_pedido") or "").strip()
+        cli_str = str(item.get("numero_cliente") or "").strip()
+        peso_val = item.get("peso_total")
+        total_val = item.get("valor_total")
+
+        tem_algum_dado = any([
+            ped_str,
+            cli_str,
+            peso_val not in (None, ""),
+            total_val not in (None, ""),
+        ])
+        if not tem_algum_dado:
             continue
-        if ped_str in pedidos_existentes:
+
+        if ped_str and ped_str in pedidos_existentes:
             duplicados_ignorados.append(ped_str)
             continue
 
@@ -225,25 +272,27 @@ def inserir_pedidos_na_planilha(
         else:
             target_row = proxima_linha_nova
             proxima_linha_nova += 1
-            _copiar_estilo_linha(ws, linha_modelo_estilo, target_row, 12)
-            if col_data and ws.cell(target_row, col_data).value is None:
-                ws.cell(target_row, col_data).value = hoje_dt
-                ws.cell(target_row, col_data).number_format = "mm-dd-yy"
-            if col_mes and ws.cell(target_row, col_mes).value is None:
-                ws.cell(target_row, col_mes).value = mes_atual_pt
-            if col_status and ws.cell(target_row, col_status).value is None:
-                ws.cell(target_row, col_status).value = "SEPARADO"
+            if linha_modelo_estilo > linha_cabecalho:
+                _copiar_estilo_linha(ws, linha_modelo_estilo, target_row, max_col_estilo)
 
-        ws.cell(target_row, col_cliente).value = _converter_identificador(item.get("numero_cliente", ""))
-        ws.cell(target_row, col_pedido).value = _converter_identificador(ped_str)
+        if col_data and (ws.cell(target_row, col_data).value is None or str(ws.cell(target_row, col_data).value).strip() == ""):
+            ws.cell(target_row, col_data).value = hoje_dt
+            ws.cell(target_row, col_data).number_format = "dd/mm/yyyy"
+        if col_mes and (ws.cell(target_row, col_mes).value is None or str(ws.cell(target_row, col_mes).value).strip() == ""):
+            ws.cell(target_row, col_mes).value = mes_atual_pt
+        if col_status and (ws.cell(target_row, col_status).value is None or str(ws.cell(target_row, col_status).value).strip() == ""):
+            ws.cell(target_row, col_status).value = "SEPARADO"
 
-        peso_val = item.get("peso_total")
-        if peso_val is not None and peso_val != "":
+        if col_cliente and cli_str:
+            ws.cell(target_row, col_cliente).value = _converter_identificador(cli_str)
+        if col_pedido and ped_str:
+            ws.cell(target_row, col_pedido).value = _converter_identificador(ped_str)
+
+        if col_peso and peso_val is not None and str(peso_val).strip() != "":
             ws.cell(target_row, col_peso).value = float(Decimal(str(peso_val)))
             ws.cell(target_row, col_peso).number_format = "0.00"
 
-        total_val = item.get("valor_total")
-        if total_val is not None and total_val != "":
+        if col_total and total_val is not None and str(total_val).strip() != "":
             ws.cell(target_row, col_total).value = float(Decimal(str(total_val)))
             ws.cell(target_row, col_total).number_format = r'_-"R$"\ * #,##0.00_-;\-"R$"\ * #,##0.00_-;_-"R$"\ * "-"??_-;_-@_-'
 
@@ -252,12 +301,13 @@ def inserir_pedidos_na_planilha(
         if col_resp and item.get("responsavel"):
             ws.cell(target_row, col_resp).value = str(item["responsavel"]).strip()
 
-        pedidos_existentes.add(ped_str)
-        inseridos.append({"id": item.get("id"), "pedido": ped_str, "linha": target_row})
+        if ped_str:
+            pedidos_existentes.add(ped_str)
+        inseridos.append({"id": item.get("id"), "pedido": ped_str or "-", "linha": target_row})
 
-    ultima_final = max(ultima_linha_com_algo, proxima_linha_nova - 1)
+    ultima_final = max(ultima_linha_com_dados, proxima_linha_nova - 1)
     if "Tabela1" in ws.tables:
-        ws.tables["Tabela1"].ref = f"A1:L{ultima_final}"
+        ws.tables["Tabela1"].ref = f"A{linha_cabecalho}:L{ultima_final}"
 
     os.makedirs(os.path.dirname(caminho_saida), exist_ok=True)
     wb.save(caminho_saida)
@@ -266,4 +316,6 @@ def inserir_pedidos_na_planilha(
         "inseridos": inseridos,
         "duplicados": duplicados_ignorados,
         "arquivo_saida": caminho_saida,
+        "aba_utilizada": aba_real,
+        "mapeamento_utilizado": map_efetivo,
     }

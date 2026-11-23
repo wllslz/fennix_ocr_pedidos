@@ -272,9 +272,12 @@ def confirmar_exportacao(request):
     lote.status = "EXPORTADO"
     lote.save()
 
+    linhas_gravadas = [str(x["linha"]) for x in resultado["inseridos"]]
     return JsonResponse({
         "ok": True,
         "inseridos": len(resultado["inseridos"]),
+        "linhas": linhas_gravadas,
+        "aba_utilizada": resultado.get("aba_utilizada"),
         "duplicados": resultado["duplicados"],
         "download_url": f"/baixar-planilha/{lote.id}/",
     })
