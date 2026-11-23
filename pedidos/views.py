@@ -23,27 +23,40 @@ from .services.field_extractor import extrair_campos_pedido, parse_decimal_br
 
 def _obter_ou_criar_planilha_padrao(planilha_id=None):
     planilha = PlanilhaModelo.objects.filter(id=planilha_id).first() if planilha_id else PlanilhaModelo.objects.first()
+    mapeamento_oficial = {
+        "data": "A",
+        "mes": "B",
+        "cliente": "C",
+        "peso": "D",
+        "total": "E",
+        "pedido": "F",
+        "tipo_expedicao": "H",
+        "status_separacao": "I",
+        "responsavel": "L",
+    }
+    rel_padrao = "planilhas_base/MANITORAMENTO_EXPEDICAO_PADRAO.xlsx"
+    abs_padrao = os.path.join(settings.MEDIA_ROOT, rel_padrao)
+
     if not planilha:
-        planilha = PlanilhaModelo.objects.create(
-            nome_original="MONITORAMENTO_EXPEDICAO_BASE.xlsx",
-            aba_destino="BASE",
-            mapeamento_colunas={
-                "data": "A",
-                "mes": "B",
-                "cliente": "C",
-                "pedido": "D",
-                "peso": "E",
-                "total": "F",
-                "tipo_expedicao": "H",
-                "status_separacao": "I",
-                "responsavel": "L",
-            },
+        planilha = PlanilhaModelo(
+            nome_original="MANITORAMENTO EXPEDIÇÃO - 26-01-26 (version 1).xlsb.xlsx",
+            aba_destino="BASE ",
+            mapeamento_colunas=mapeamento_oficial,
         )
+        if os.path.exists(abs_padrao):
+            planilha.arquivo_original.name = rel_padrao
+        planilha.save()
+    elif (not planilha.arquivo_original or not os.path.exists(planilha.arquivo_original.path)) and os.path.exists(abs_padrao):
+        planilha.nome_original = "MANITORAMENTO EXPEDIÇÃO - 26-01-26 (version 1).xlsb.xlsx"
+        planilha.aba_destino = "BASE "
+        planilha.mapeamento_colunas = mapeamento_oficial
+        planilha.arquivo_original.name = rel_padrao
+        planilha.save()
     return planilha
 
 
 def dashboard(request):
-    planilha = PlanilhaModelo.objects.first()
+    planilha = _obter_ou_criar_planilha_padrao()
     lote = LoteProcessamento.objects.filter(planilha=planilha).first() if planilha else None
     pedidos = lote.pedidos.all() if lote else []
     return render(
