@@ -226,24 +226,16 @@ def inserir_pedidos_na_planilha(
 
     pedidos_existentes = set()
     ultima_linha_com_dados = linha_cabecalho
-    linhas_vagas_disponiveis = []
-    linhas_vazias_seguidas = 0
+    limite_real = min(ws.max_row, 50000)
 
-    for r in range(linha_cabecalho + 1, min(ws.max_row + 1, 50000)):
+    # Varre todas as linhas até o fim real da aba para encontrar a última linha preenchida
+    for r in range(linha_cabecalho + 1, limite_real + 1):
         row_vals = [ws.cell(r, c).value for c in cols_monitoradas]
         if any(v is not None and str(v).strip() != "" for v in row_vals):
             ultima_linha_com_dados = r
-            linhas_vazias_seguidas = 0
             ped_val = ws.cell(r, col_pedido).value if col_pedido else None
-            cli_val = ws.cell(r, col_cliente).value if col_cliente else None
             if ped_val is not None and str(ped_val).strip() != "":
                 pedidos_existentes.add(str(ped_val).strip())
-            elif (cli_val is None or str(cli_val).strip() == "") and (col_pedido or col_cliente):
-                linhas_vagas_disponiveis.append(r)
-        else:
-            linhas_vazias_seguidas += 1
-            if linhas_vazias_seguidas > 50:
-                break
 
     linha_modelo_estilo = ultima_linha_com_dados if ultima_linha_com_dados > linha_cabecalho else 0
     proxima_linha_nova = ultima_linha_com_dados + 1
@@ -273,13 +265,11 @@ def inserir_pedidos_na_planilha(
             duplicados_ignorados.append(ped_str)
             continue
 
-        if linhas_vagas_disponiveis:
-            target_row = linhas_vagas_disponiveis.pop(0)
-        else:
-            target_row = proxima_linha_nova
-            proxima_linha_nova += 1
-            if linha_modelo_estilo > linha_cabecalho:
-                _copiar_estilo_linha(ws, linha_modelo_estilo, target_row, max_col_estilo)
+        # Sempre preenche estritamente a partir da última linha preenchida
+        target_row = proxima_linha_nova
+        proxima_linha_nova += 1
+        if linha_modelo_estilo > linha_cabecalho:
+            _copiar_estilo_linha(ws, linha_modelo_estilo, target_row, max_col_estilo)
 
         if col_data and (ws.cell(target_row, col_data).value is None or str(ws.cell(target_row, col_data).value).strip() == ""):
             ws.cell(target_row, col_data).value = hoje_dt

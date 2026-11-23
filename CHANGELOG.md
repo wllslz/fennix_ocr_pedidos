@@ -1,6 +1,6 @@
 # Histórico de Versões (Changelog)
 
-Registro cronológico desde o primeiro commit do repositório (17 commits).
+Registro cronológico desde o primeiro commit do repositório (18 commits).
 
 ## 1. 0bbefe2 (2026-11-23) - feat: sistema Django OCR de pedidos pronto para Vercel e WhatsApp
 - **Autor:** Willian Lira de Souza
@@ -50,6 +50,9 @@ Registro cronológico desde o primeiro commit do repositório (17 commits).
 ## 16. 3a2700e (2026-11-23) - feat(excel-style): clona altura da linha e ignora linhas apenas com bordas na insercao
 - **Autor:** Willian Lira
 
-## 17. Entrega Atual - fix(excel-inplace): grava diretamente na planilha enviada e mantem nome original no download
-- **Resumo:** Altera `confirmar_exportacao` e `baixar_planilha` em `pedidos/views.py` para gravar os pedidos diretamente sobre a planilha enviada (`arquivo_original.path`), preservando backup de segurança em `media/backups/` e baixando o arquivo com seu exato nome original sem prefixos.
+## 17. 8142a29 (2026-11-23) - fix(excel-inplace): grava diretamente na planilha enviada e mantem nome original no download
+- **Autor:** Willian Lira
+
+## 18. Entrega Atual - fix(excel-append): preenche estritamente a partir da ultima linha da planilha enviada
+- **Resumo:** Remove a busca por linhas intermediárias vazias para preencher sempre sequencialmente após a última linha preenchida da aba, grava diretamente na planilha enviada (`arquivo_original.path`) e mantém o nome original exato no download.
 

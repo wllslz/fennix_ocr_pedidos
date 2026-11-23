@@ -22,7 +22,7 @@ from .services.field_extractor import extrair_campos_pedido, parse_decimal_br
 
 
 def _obter_ou_criar_planilha_padrao(planilha_id=None):
-    planilha = PlanilhaModelo.objects.filter(id=planilha_id).first() if planilha_id else PlanilhaModelo.objects.first()
+    planilha = PlanilhaModelo.objects.filter(id=planilha_id).first() if planilha_id else PlanilhaModelo.objects.order_by('-id').first()
     mapeamento_oficial = {
         "data": "A",
         "mes": "B",
