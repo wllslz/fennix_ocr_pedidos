@@ -318,10 +318,8 @@ def confirmar_exportacao(request):
         caminho_origem = lote.planilha.arquivo_original.path
         backup_path = criar_backup_planilha(caminho_origem, os.path.join(settings.MEDIA_ROOT, "backups"))
 
-        base_nome = os.path.basename(lote.planilha.nome_original or "planilha.xlsx")
-        dir_exportados = os.path.join(settings.MEDIA_ROOT, "exportados")
-        os.makedirs(dir_exportados, exist_ok=True)
-        caminho_saida = os.path.join(dir_exportados, f"ATUALIZADO_LOTE_{lote.id}_{base_nome}")
+        # Grava diretamente na propria planilha enviada, preservando nome, estrutura e dados anteriores
+        caminho_saida = caminho_origem
 
         resultado = inserir_pedidos_na_planilha(
             caminho_base=caminho_origem,
@@ -367,14 +365,18 @@ def confirmar_exportacao(request):
 
 def baixar_planilha(request, lote_id):
     lote = LoteProcessamento.objects.filter(id=lote_id).first()
-    if not lote or not lote.arquivo_exportado:
-        return JsonResponse({"ok": False, "erro": "Planilha atualizada não encontrada."}, status=404)
-    caminho = str(lote.arquivo_exportado)
-    if not os.path.exists(caminho):
-        caminho = os.path.join(settings.MEDIA_ROOT, caminho)
-    if not os.path.exists(caminho):
-        return JsonResponse({"ok": False, "erro": "Arquivo exportado não localizado no disco."}, status=404)
-    nome_dl = f"ATUALIZADO_{os.path.basename(lote.planilha.nome_original or 'planilha.xlsx')}"
+    if not lote:
+        return JsonResponse({"ok": False, "erro": "Lote não encontrado."}, status=404)
+    caminho = ""
+    if lote.planilha and lote.planilha.arquivo_original:
+        caminho = lote.planilha.arquivo_original.path
+    elif lote.arquivo_exportado:
+        caminho = str(lote.arquivo_exportado)
+        if not os.path.exists(caminho):
+            caminho = os.path.join(settings.MEDIA_ROOT, caminho)
+    if not caminho or not os.path.exists(caminho):
+        return JsonResponse({"ok": False, "erro": "Planilha não localizada no disco."}, status=404)
+    nome_dl = os.path.basename(lote.planilha.nome_original or os.path.basename(caminho))
     return FileResponse(
         open(caminho, "rb"),
         as_attachment=True,
