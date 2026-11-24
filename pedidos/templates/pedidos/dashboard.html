@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <title>Fennix Expedição — Automação</title>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <style>
     body{font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;margin:0;padding:24px}
     .box{max-width:1100px;margin:auto}.card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin-bottom:18px}
@@ -49,29 +50,46 @@
 </div>
 
 <script>
-const csrf = '{{ csrf_token }}';
-let planilhaFile = null;
+const MESES_PT = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+let workbook = null;
+let nomeArquivo = "";
+let abaBaseNome = "";
 let itens = [];
+
+function encontrarAbaBase(wb) {
+  const nome = wb.SheetNames.find(n => n.trim().toUpperCase() === "BASE");
+  if (!nome) throw new Error(`Aba BASE não encontrada. Abas disponíveis: ${wb.SheetNames.join(", ")}`);
+  return nome;
+}
+
+function encontrarProximaLinha(ws) {
+  const range = XLSX.utils.decode_range(ws['!ref'] || "A1:L2");
+  const maxR = Math.min(range.e.r, 50000);
+  for (let r = maxR; r >= 1; r--) {
+    const ped = ws[XLSX.utils.encode_cell({ r, c: 5 })]; // Col F
+    const cli = ws[XLSX.utils.encode_cell({ r, c: 2 })]; // Col C
+    if ((ped && ped.v != null && ped.v !== "") || (cli && cli.v != null && cli.v !== "")) {
+      return r + 1; // 0-indexed da proxima linha livre
+    }
+  }
+  return 1;
+}
 
 document.getElementById('fXls').onchange = async e => {
   const f = e.target.files[0];
   if (!f) return;
-  planilhaFile = f;
-  document.getElementById('stXls').innerText = 'Verificando abas da planilha...';
+  nomeArquivo = f.name;
+  document.getElementById('stXls').innerText = 'Lendo estrutura da planilha...';
   try {
-    const fd = new FormData();
-    fd.append('planilha', f);
-    const r = await fetch("{% url 'upload_planilha' %}", {
-      method: 'POST',
-      headers: { 'X-CSRFToken': csrf },
-      body: fd
-    });
-    const d = await r.json();
-    document.getElementById('stXls').innerHTML = r.ok
-      ? `${d.mensagem} | Próxima linha livre: <b>${d.resumo.proxima_linha}</b>`
-      : `Erro: ${d.erro}`;
+    const buf = await f.arrayBuffer();
+    workbook = XLSX.read(buf, { type: 'array', cellStyles: true, cellDates: true });
+    abaBaseNome = encontrarAbaBase(workbook);
+    const proxIdx = encontrarProximaLinha(workbook.Sheets[abaBaseNome]);
+    document.getElementById('stXls').innerHTML =
+      `Planilha <b>${nomeArquivo}</b> carregada na aba <b>${abaBaseNome}</b> | Próxima linha livre: <b>${proxIdx + 1}</b>`;
   } catch (err) {
-    document.getElementById('stXls').innerText = 'Falha ao validar planilha: ' + err.message;
+    workbook = null;
+    document.getElementById('stXls').innerText = 'Erro: ' + err.message;
   }
 };
 
@@ -83,14 +101,13 @@ function parseNumBR(str) {
 }
 
 function extrairCamposTexto(texto) {
-  let mPed = texto.match(/(?:Pedido|Ped\.?|N[ºo°]\s*Pedido)\s*[:#-]?\s*(\d{7,12})/i) || texto.match(/(47\d{8})/);
+  let mPed = texto.match(/(?:Pedido|Ped\.?|N[ºo°]\s*Pedido)\s*[:#-]?\s*(\d{7,12})/i) || texto.match(/\b(47\d{8})\b/);
   if (!mPed) throw new Error('Número do pedido não encontrado.');
 
-  let mCli = texto.match(/Cliente\s*[:\-]?\s*(\d{2,8})\s*[-–—]\s*([^
-]+)/i) || texto.match(/(\d{4,6})\s*[-–—]\s*([A-ZÀ-Ú0-9 .,&/-]{4,})/);
+  let mCli = texto.match(/Cliente\s*[:\-]?\s*(\d{2,8})\s*[-–—]\s*([^\n\r]+)/i) || texto.match(/\b(\d{4,6})\s*[-–—]\s*([A-ZÀ-Ú0-9 .,&/-]{4,})/);
   if (!mCli) throw new Error('Código do cliente não encontrado.');
 
-  let mPeso = texto.match(/(\d{1,5}[.,]\d{1,3})\s*Kg/i);
+  let mPeso = texto.match(/(\d{1,5}[.,]\d{1,3})\s*Kg\b/i);
   if (!mPeso) throw new Error('Peso (Kg) não encontrado.');
 
   let mVal = texto.match(/(?:Valor\s*Total|Total\s*(?:do\s*Pedido|Geral|L[ií]quido)?)\s*[:\-]?\s*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+[.,]\d{2})/i);
@@ -103,7 +120,7 @@ function extrairCamposTexto(texto) {
     valor = Math.max(...todos);
   }
 
-  let mData = texto.match(/(\d{2}\/\d{2}\/20\d{2})/);
+  let mData = texto.match(/\b(\d{2}\/\d{2}\/20\d{2})\b/);
   const hoje = new Date().toLocaleDateString('pt-BR');
 
   return {
@@ -119,12 +136,11 @@ function extrairCamposTexto(texto) {
 
 async function lerImgs(files) {
   if (!files || !files.length) return;
-  document.getElementById('stIa').innerText = `Lendo ${files.length} print(s) localmente...`;
+  document.getElementById('stIa').innerText = `Lendo ${files.length} print(s)...`;
   for (const f of files) {
     try {
       const { data: { text } } = await Tesseract.recognize(f, 'por');
-      const dados = extrairCamposTexto(text);
-      itens.push(dados);
+      itens.push(extrairCamposTexto(text));
     } catch (e) {
       alert(`Erro ao ler ${f.name || 'print'}: ${e.message}`);
     }
@@ -152,57 +168,67 @@ function render() {
   </tr>`).join('');
 }
 
-async function gravar() {
-  if (!planilhaFile) return alert('Selecione a planilha .xlsx primeiro no passo 1.');
+function gravar() {
+  if (!workbook) return alert('Selecione a planilha .xlsx primeiro no passo 1.');
   if (!itens.length) return alert('Nenhum pedido na tabela para gravar.');
 
-  const btn = document.getElementById('btnGravar');
-  btn.disabled = true;
-  document.getElementById('stGrv').innerText = 'Gravando na aba BASE e gerando arquivo atualizado...';
+  const ws = workbook.Sheets[abaBaseNome];
+  const range = XLSX.utils.decode_range(ws['!ref'] || "A1:L2");
+  const existentes = new Set();
+  for (let r = 1; r <= Math.min(range.e.r, 50000); r++) {
+    const cell = ws[XLSX.utils.encode_cell({ r, c: 5 })];
+    if (cell && cell.v != null) existentes.add(String(cell.v).trim());
+  }
 
-  try {
-    const fd = new FormData();
-    fd.append('planilha', planilhaFile);
-    fd.append('pedidos', JSON.stringify(itens));
-    fd.append('responsavel', document.getElementById('resp').value);
+  let r = encontrarProximaLinha(ws);
+  const respObs = document.getElementById('resp').value.trim();
+  let inseridos = 0, duplicados = 0;
 
-    const r = await fetch("{% url 'gravar_na_planilha' %}", {
-      method: 'POST',
-      headers: { 'X-CSRFToken': csrf },
-      body: fd
-    });
-
-    if (!r.ok) {
-      const err = await r.json();
-      document.getElementById('stGrv').innerText = 'Erro: ' + (err.erro || 'Falha na gravação.');
-      return;
+  for (const p of itens) {
+    const pedStr = String(p.numero_pedido).trim();
+    if (existentes.has(pedStr)) {
+      duplicados++;
+      continue;
     }
 
-    const inseridos = r.headers.get('X-Inseridos') || '0';
-    const duplicados = r.headers.get('X-Duplicados') || '0';
-    const prox = r.headers.get('X-Proxima-Linha') || '';
+    const [dd, mm, yyyy] = (p.data_pedido || '').split('/').map(Number);
+    const dt = (dd && mm && yyyy) ? new Date(yyyy, mm - 1, dd) : new Date();
 
-    const blob = await r.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = planilhaFile.name;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    const setCell = (c, val, tipo, fmt) => {
+      const addr = XLSX.utils.encode_cell({ r, c });
+      if (!ws[addr]) ws[addr] = { t: tipo, v: val };
+      else { ws[addr].t = tipo; ws[addr].v = val; }
+      if (fmt) ws[addr].z = fmt;
+    };
 
-    // Atualiza referencia local para permitir novas gravacoes seguidas sem reenviar o arquivo antigo
-    planilhaFile = new File([blob], planilhaFile.name, { type: planilhaFile.type });
-    document.getElementById('stGrv').innerText =
-      `Concluído e baixado! Inseridos: ${inseridos} | Duplicados ignorados: ${duplicados} | Próxima linha livre: ${prox}`;
-    itens = [];
-    render();
-  } catch (e) {
-    document.getElementById('stGrv').innerText = 'Erro de conexão: ' + e.message;
-  } finally {
-    btn.disabled = false;
+    if (!ws[XLSX.utils.encode_cell({ r, c: 0 })]?.v) setCell(0, dt, 'd', 'dd/mm/yyyy');
+    if (!ws[XLSX.utils.encode_cell({ r, c: 1 })]?.v) setCell(1, MESES_PT[dt.getMonth()], 's');
+    setCell(2, Number(p.codigo_cliente), 'n');
+    setCell(3, Number(p.peso_total), 'n', '0.00');
+    setCell(4, Number(p.valor_total), 'n', '#,##0.00');
+    setCell(5, Number(p.numero_pedido), 'n');
+    setCell(7, p.tipo_expedicao || 'LOJA', 's');
+    setCell(8, 'SEPARADO', 's');
+    if (respObs && !ws[XLSX.utils.encode_cell({ r, c: 10 })]?.v) setCell(10, respObs, 's');
+
+    existentes.add(pedStr);
+    r++;
+    inseridos++;
   }
+
+  if (r - 1 > range.e.r) {
+    range.e.r = r - 1;
+    range.e.c = Math.max(range.e.c, 11);
+    ws['!ref'] = XLSX.utils.encode_range(range);
+  }
+
+  XLSX.writeFile(workbook, nomeArquivo);
+  document.getElementById('stGrv').innerText =
+    `Concluído e baixado! Inseridos: ${inseridos} | Duplicados ignorados: ${duplicados} | Próxima linha livre: ${r + 1}`;
+  document.getElementById('stXls').innerHTML =
+    `Planilha <b>${nomeArquivo}</b> atualizada na aba <b>${abaBaseNome}</b> | Próxima linha livre: <b>${r + 1}</b>`;
+  itens = [];
+  render();
 }
 </script>
 </body>
