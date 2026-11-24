@@ -112,8 +112,8 @@ function carregarImagem(file) {
   });
 }
 
-// Gera canvas recortado e ampliado com opção de binarização (limiarização)
-function gerarCanvasRecorte(img, yStartRatio, yEndRatio, scale, binarizar) {
+// Normaliza fundo cinza sombreado para branco sem destruir texto fino
+function gerarCanvasNormalizado(img, yStartRatio, yEndRatio, scale) {
   const sy = Math.floor(img.height * yStartRatio);
   const sh = Math.ceil(img.height * (yEndRatio - yStartRatio));
   const canvas = document.createElement('canvas');
@@ -121,18 +121,16 @@ function gerarCanvasRecorte(img, yStartRatio, yEndRatio, scale, binarizar) {
   canvas.height = Math.round(sh * scale);
   const ctx = canvas.getContext('2d');
   ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, 0, sy, img.width, sh, 0, 0, canvas.width, canvas.height);
 
   const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
   const d = imgData.data;
   for (let i = 0; i < d.length; i += 4) {
     const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-    let val;
-    if (binarizar) {
-      val = gray < 175 ? 0 : 255;
-    } else {
-      val = Math.min(255, Math.max(0, (gray - 128) * 1.35 + 128));
-    }
+    // Mapeia tudo acima de 135 (fundos cinza claro/médio da tabela) para branco puro (255)
+    // e estica os tons escuros (texto) suavemente entre 0 e 255
+    let val = gray >= 135 ? 255 : Math.max(0, Math.round((gray / 135) * 210));
     d[i] = d[i + 1] = d[i + 2] = val;
   }
   ctx.putImageData(imgData, 0, 0);
@@ -141,11 +139,8 @@ function gerarCanvasRecorte(img, yStartRatio, yEndRatio, scale, binarizar) {
 
 function buscarPesoNoTexto(texto) {
   const padroes = [
-    // 1. Palavra Peso (ou variação OCR) seguida do número
     /(?:P[eao]s[oa]|[eao]s[oa])(?:\s*Total|\s*Bruto|\s*L[ií]q\.?)?\s*[:\-]?\s*(\d{1,5}(?:[.,]|\s+)\d{2,3})/i,
-    // 2. Entre N.Itens e Total na linha do rodapé
-    /Itens\s*[:\-]?\s*\d+[^\n\r]{0,40}?(\d{1,5}(?:[.,]|\s+)\d{2,3})(?:\s*K\w*)?[^\n\r]{0,30}?Total/i,
-    // 3. Número decimal seguido de Kg / Kq / K + letra
+    /Itens\s*[:\-]?\s*\d+[^\n\r]{0,45}?(\d{1,5}(?:[.,]|\s+)\d{2,3})(?:\s*K\w*)?[^\n\r]{0,35}?Total/i,
     /(\d{1,5}(?:[.,]|\s+)\d{2,3})\s*K[a-z0-9]{1,2}\b/i
   ];
   for (const rx of padroes) {
@@ -158,8 +153,8 @@ function buscarPesoNoTexto(texto) {
 async function processarPrint(file) {
   const img = await carregarImagem(file);
 
-  // Passe 1: Imagem inteira ampliada 2x para Cabeçalho (Pedido, Cliente, Data) + tentativa geral
-  const canvasFull = gerarCanvasRecorte(img, 0, 1, 2.0, false);
+  // Passe 1: Imagem completa 2x normalizada (fundo cinza -> branco, texto preservado)
+  const canvasFull = gerarCanvasNormalizado(img, 0, 1, 2.0);
   const resFull = await Tesseract.recognize(canvasFull, 'por');
   const txtFull = resFull.data.text;
 
@@ -172,20 +167,24 @@ async function processarPrint(file) {
   let mData = txtFull.match(/\b(\d{2}\/\d{2}\/20\d{2})\b/);
   const hoje = new Date().toLocaleDateString('pt-BR');
 
-  // Passe 2: Recorte exclusivo da metade inferior (rodapé) ampliado 4x + binarizado com PSM 6 (bloco único de texto)
-  const canvasRodape = gerarCanvasRecorte(img, 0.45, 1.0, 4.0, true);
-  const resRodape = await Tesseract.recognize(canvasRodape, 'por', {
-    tessedit_pageseg_mode: '6'
-  });
-  const txtRodape = resRodape.data.text;
-  const textoCombinado = txtRodape + "\n" + txtFull;
-
-  let peso = buscarPesoNoTexto(txtRodape) ?? buscarPesoNoTexto(txtFull);
+  // Passe 2: Recorte da faixa central/inferior (35% a 90%) ampliado 3.5x normalizado com PSM 4 (tabela/colunas)
+  let peso = buscarPesoNoTexto(txtFull);
+  let txtRodape = "";
   if (peso === null || isNaN(peso)) {
-    const dbg = txtRodape.replace(/\s+/g, ' ').trim();
-    throw new Error(`Peso (Kg) não encontrado no rodapé. Leitura do rodapé: "${dbg}"`);
+    const canvasFaixa = gerarCanvasNormalizado(img, 0.35, 0.90, 3.5);
+    const resFaixa = await Tesseract.recognize(canvasFaixa, 'por', {
+      tessedit_pageseg_mode: '4'
+    });
+    txtRodape = resFaixa.data.text;
+    peso = buscarPesoNoTexto(txtRodape);
   }
 
+  if (peso === null || isNaN(peso)) {
+    const dbg = (txtRodape || txtFull).replace(/\s+/g, ' ').trim();
+    throw new Error(`Peso (Kg) não encontrado. Leitura: "${dbg}"`);
+  }
+
+  const textoCombinado = txtRodape + "\n" + txtFull;
   let mVal = textoCombinado.match(/(?:Valor\s*Total|Total\s*(?:do\s*Pedido|Geral|L[ií]quido)?)\s*[:\-]?\s*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+[.,]\d{2})/i);
   let valor = 0;
   if (mVal) {
@@ -211,7 +210,7 @@ async function processarPrint(file) {
 
 async function lerImgs(files) {
   if (!files || !files.length) return;
-  document.getElementById('stIa').innerText = `Analisando cabeçalho e rodapé de ${files.length} print(s)...`;
+  document.getElementById('stIa').innerText = `Analisando ${files.length} print(s)...`;
   for (const f of files) {
     try {
       const dados = await processarPrint(f);
