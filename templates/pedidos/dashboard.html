@@ -1,62 +1,209 @@
 <!DOCTYPE html>
-<html lang="pt-BR"><head><meta charset="UTF-8"><title>Fennix Expedição</title>
-<style>
-body{font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;margin:0;padding:24px}
-.box{max-width:1100px;margin:auto}.card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin-bottom:18px}
-.drop{border:2px dashed #475569;border-radius:8px;padding:26px;text-align:center;cursor:pointer}.drop:hover{border-color:#38bdf8}
-table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border-bottom:1px solid #334155;padding:8px;text-align:left}
-input{background:#0f172a;border:1px solid #475569;color:#fff;padding:6px;border-radius:4px;width:90%}
-button{background:#2563eb;color:#fff;border:none;padding:9px 16px;border-radius:6px;cursor:pointer;font-weight:600}
-button.ok{background:#16a34a}button.del{background:#dc2626;padding:5px 9px}.st{margin-top:10px;color:#38bdf8}
-</style></head><body><div class="box"><h1>Fennix Expedição — Cadastro Automático</h1>
-<div class="card"><h3>1. Planilha Base (.xlsx)</h3>
-<input type="file" id="fXls" accept=".xlsx" style="width:auto">
-<a href="{% url 'baixar_planilha' %}" id="btnDl" style="display:{% if planilha_ativa %}inline-block{% else %}none{% endif %}"><button type="button" class="ok">Baixar Planilha Atualizada</button></a>
-<div id="stXls" class="st">{% if resumo %}Ativa: <b>{{ planilha_ativa }}</b> | Aba: <b>{{ resumo.aba_alvo }}</b> | Próxima linha: <b>{{ resumo.proxima_linha }}</b>{% else %}Selecione a planilha oficial.{% endif %}</div></div>
-<div class="card"><h3>2. Prints de Pedidos (Clique, Arraste ou Ctrl + V)</h3>
-<div class="drop" onclick="document.getElementById('fImg').click()">Clique aqui ou pressione <b>Ctrl + V</b> para colar prints<input type="file" id="fImg" accept="image/*" multiple hidden></div>
-<div id="stIa" class="st"></div></div>
-<div class="card"><h3>3. Conferência antes de Gravar</h3>
-Conferente (Col K): <input type="text" id="resp" placeholder="Ex: Willian" style="width:200px">
-<button type="button" class="ok" onclick="gravar()">Gravar na Aba BASE</button>
-<table><thead><tr><th>Data</th><th>Cód. Cliente</th><th>Cliente</th><th>Pedido</th><th>Peso (Kg)</th><th>Valor</th><th>Tipo</th><th></th></tr></thead><tbody id="tb"></tbody></table>
-<div id="stGrv" class="st"></div></div></div>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Fennix Expedição — Automação</title>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <style>
+    body{font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;margin:0;padding:24px}
+    .box{max-width:1100px;margin:auto}.card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin-bottom:18px}
+    .drop{border:2px dashed #475569;border-radius:8px;padding:26px;text-align:center;cursor:pointer}.drop:hover{border-color:#38bdf8}
+    table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border-bottom:1px solid #334155;padding:8px;text-align:left}
+    input{background:#0f172a;border:1px solid #475569;color:#fff;padding:6px;border-radius:4px;width:90%}
+    button{background:#2563eb;color:#fff;border:none;padding:10px 18px;border-radius:6px;cursor:pointer;font-weight:600}
+    button:disabled{opacity:0.5;cursor:not-allowed}
+    button.ok{background:#16a34a}button.del{background:#dc2626;padding:5px 9px}.st{margin-top:10px;color:#38bdf8;font-size:0.95rem}
+  </style>
+</head>
+<body>
+<div class="box">
+  <h1>Fennix Expedição — Cadastro Automático na Planilha</h1>
+
+  <div class="card">
+    <h3>1. Planilha Base (.xlsx)</h3>
+    <input type="file" id="fXls" accept=".xlsx" style="width:auto">
+    <div id="stXls" class="st">Selecione a planilha oficial de monitoramento da expedição.</div>
+  </div>
+
+  <div class="card">
+    <h3>2. Prints de Pedidos (Clique, Arraste ou Ctrl + V)</h3>
+    <div class="drop" onclick="document.getElementById('fImg').click()">
+      Clique aqui ou pressione <b>Ctrl + V</b> para colar prints de pedidos
+      <input type="file" id="fImg" accept="image/*" multiple hidden>
+    </div>
+    <div id="stIa" class="st"></div>
+  </div>
+
+  <div class="card">
+    <h3>3. Conferência e Download da Planilha Atualizada</h3>
+    Conferente (Col K): <input type="text" id="resp" placeholder="Ex: Willian" style="width:200px">
+    <button type="button" class="ok" id="btnGravar" onclick="gravar()">Gravar na Aba BASE e Baixar .xlsx</button>
+    <table>
+      <thead>
+        <tr><th>Data</th><th>Cód. Cliente</th><th>Cliente</th><th>Pedido</th><th>Peso (Kg)</th><th>Valor</th><th>Tipo</th><th></th></tr>
+      </thead>
+      <tbody id="tb"></tbody>
+    </table>
+    <div id="stGrv" class="st"></div>
+  </div>
+</div>
+
 <script>
-const csrf='{{ csrf_token }}';let itens=[];
-document.getElementById('fXls').onchange=async e=>{
-  const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append('planilha',f);
-  document.getElementById('stXls').innerText='Analisando planilha...';
-  const r=await fetch("{% url 'upload_planilha' %}",{method:'POST',headers:{'X-CSRFToken':csrf},body:fd});const d=await r.json();
-  document.getElementById('stXls').innerHTML=r.ok?`${d.mensagem} | Próxima linha: <b>${d.resumo.proxima_linha}</b>`:d.erro;
-  if(r.ok)document.getElementById('btnDl').style.display='inline-block';
+const csrf = '{{ csrf_token }}';
+let planilhaFile = null;
+let itens = [];
+
+document.getElementById('fXls').onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  planilhaFile = f;
+  document.getElementById('stXls').innerText = 'Verificando abas da planilha...';
+  try {
+    const fd = new FormData();
+    fd.append('planilha', f);
+    const r = await fetch("{% url 'upload_planilha' %}", {
+      method: 'POST',
+      headers: { 'X-CSRFToken': csrf },
+      body: fd
+    });
+    const d = await r.json();
+    document.getElementById('stXls').innerHTML = r.ok
+      ? `${d.mensagem} | Próxima linha livre: <b>${d.resumo.proxima_linha}</b>`
+      : `Erro: ${d.erro}`;
+  } catch (err) {
+    document.getElementById('stXls').innerText = 'Falha ao validar planilha: ' + err.message;
+  }
 };
-async function lerImgs(files){
-  if(!files.length)return;const fd=new FormData();
-  for(const f of files)fd.append('imagens',f,f.name&&f.name!=='image.png'?f.name:`print_${Date.now()}.png`);
-  document.getElementById('stIa').innerText='Extraindo dados via Tesseract OCR...';
-  const r=await fetch("{% url 'processar_imagens_ia' %}",{method:'POST',headers:{'X-CSRFToken':csrf},body:fd});const d=await r.json();
-  if(!r.ok){document.getElementById('stIa').innerText=d.erro;return;}
-  d.pedidos.forEach(p=>p.sucesso?itens.push(p):alert(p.erro));
-  document.getElementById('stIa').innerText=`${itens.length} pedido(s) prontos para conferir.`;render();
+
+function parseNumBR(str) {
+  let s = str.replace(/[^\d,.]/g, '');
+  if (s.includes(',') && s.includes('.')) s = s.replace(/\./g, '').replace(',', '.');
+  else if (s.includes(',')) s = s.replace(',', '.');
+  return parseFloat(s);
 }
-document.getElementById('fImg').onchange=e=>lerImgs(e.target.files);
-document.onpaste=e=>{const imgs=[...(e.clipboardData?.items||[])].filter(i=>i.type.startsWith('image/')).map(i=>i.getAsFile());if(imgs.length)lerImgs(imgs);};
-function render(){
-  document.getElementById('tb').innerHTML=itens.map((p,i)=>`<tr>
-  <td><input value="${p.data_pedido}" onchange="itens[${i}].data_pedido=this.value"></td>
-  <td><input type="number" value="${p.codigo_cliente}" onchange="itens[${i}].codigo_cliente=+this.value"></td>
-  <td>${p.nome_cliente||''}</td>
-  <td><input type="number" value="${p.numero_pedido}" onchange="itens[${i}].numero_pedido=+this.value"></td>
-  <td><input type="number" step="0.01" value="${p.peso_total}" onchange="itens[${i}].peso_total=+this.value"></td>
-  <td><input type="number" step="0.01" value="${p.valor_total}" onchange="itens[${i}].valor_total=+this.value"></td>
-  <td><input value="${p.tipo_expedicao||'LOJA'}" onchange="itens[${i}].tipo_expedicao=this.value"></td>
-  <td><button class="del" onclick="itens.splice(${i},1);render()">X</button></td></tr>`).join('');
+
+function extrairCamposTexto(texto) {
+  let mPed = texto.match(/(?:Pedido|Ped\.?|N[ºo°]\s*Pedido)\s*[:#-]?\s*(\d{7,12})/i) || texto.match(/(47\d{8})/);
+  if (!mPed) throw new Error('Número do pedido não encontrado.');
+
+  let mCli = texto.match(/Cliente\s*[:\-]?\s*(\d{2,8})\s*[-–—]\s*([^
+]+)/i) || texto.match(/(\d{4,6})\s*[-–—]\s*([A-ZÀ-Ú0-9 .,&/-]{4,})/);
+  if (!mCli) throw new Error('Código do cliente não encontrado.');
+
+  let mPeso = texto.match(/(\d{1,5}[.,]\d{1,3})\s*Kg/i);
+  if (!mPeso) throw new Error('Peso (Kg) não encontrado.');
+
+  let mVal = texto.match(/(?:Valor\s*Total|Total\s*(?:do\s*Pedido|Geral|L[ií]quido)?)\s*[:\-]?\s*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+[.,]\d{2})/i);
+  let valor = 0;
+  if (mVal) {
+    valor = parseNumBR(mVal[1]);
+  } else {
+    const todos = [...texto.matchAll(/(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})/g)].map(m => parseNumBR(m[1]));
+    if (!todos.length) throw new Error('Valor total não encontrado.');
+    valor = Math.max(...todos);
+  }
+
+  let mData = texto.match(/(\d{2}\/\d{2}\/20\d{2})/);
+  const hoje = new Date().toLocaleDateString('pt-BR');
+
+  return {
+    codigo_cliente: parseInt(mCli[1], 10),
+    nome_cliente: mCli[2].trim(),
+    numero_pedido: parseInt(mPed[1], 10),
+    peso_total: parseNumBR(mPeso[1]),
+    valor_total: valor,
+    data_pedido: mData ? mData[1] : hoje,
+    tipo_expedicao: 'LOJA'
+  };
 }
-async function gravar(){
-  if(!itens.length)return alert('Sem pedidos na tabela.');
-  const r=await fetch("{% url 'gravar_na_planilha' %}",{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({pedidos:itens,responsavel:document.getElementById('resp').value})});
-  const d=await r.json();
-  if(r.ok){document.getElementById('stGrv').innerText=`Gravados: ${d.resultado.inseridos} | Duplicados ignorados: ${d.resultado.ignorados_duplicados.length} | Próxima linha: ${d.resumo.proxima_linha}`;itens=[];render();}
-  else document.getElementById('stGrv').innerText=d.erro;
+
+async function lerImgs(files) {
+  if (!files || !files.length) return;
+  document.getElementById('stIa').innerText = `Lendo ${files.length} print(s) localmente...`;
+  for (const f of files) {
+    try {
+      const { data: { text } } = await Tesseract.recognize(f, 'por');
+      const dados = extrairCamposTexto(text);
+      itens.push(dados);
+    } catch (e) {
+      alert(`Erro ao ler ${f.name || 'print'}: ${e.message}`);
+    }
+  }
+  document.getElementById('stIa').innerText = `${itens.length} pedido(s) prontos na tabela.`;
+  render();
 }
-</script></body></html>
+
+document.getElementById('fImg').onchange = e => lerImgs(e.target.files);
+document.onpaste = e => {
+  const imgs = [...(e.clipboardData?.items || [])].filter(i => i.type.startsWith('image/')).map(i => i.getAsFile());
+  if (imgs.length) lerImgs(imgs);
+};
+
+function render() {
+  document.getElementById('tb').innerHTML = itens.map((p, i) => `<tr>
+    <td><input value="${p.data_pedido}" onchange="itens[${i}].data_pedido=this.value"></td>
+    <td><input type="number" value="${p.codigo_cliente}" onchange="itens[${i}].codigo_cliente=+this.value"></td>
+    <td>${p.nome_cliente || ''}</td>
+    <td><input type="number" value="${p.numero_pedido}" onchange="itens[${i}].numero_pedido=+this.value"></td>
+    <td><input type="number" step="0.01" value="${p.peso_total}" onchange="itens[${i}].peso_total=+this.value"></td>
+    <td><input type="number" step="0.01" value="${p.valor_total}" onchange="itens[${i}].valor_total=+this.value"></td>
+    <td><input value="${p.tipo_expedicao || 'LOJA'}" onchange="itens[${i}].tipo_expedicao=this.value"></td>
+    <td><button class="del" onclick="itens.splice(${i},1);render()">X</button></td>
+  </tr>`).join('');
+}
+
+async function gravar() {
+  if (!planilhaFile) return alert('Selecione a planilha .xlsx primeiro no passo 1.');
+  if (!itens.length) return alert('Nenhum pedido na tabela para gravar.');
+
+  const btn = document.getElementById('btnGravar');
+  btn.disabled = true;
+  document.getElementById('stGrv').innerText = 'Gravando na aba BASE e gerando arquivo atualizado...';
+
+  try {
+    const fd = new FormData();
+    fd.append('planilha', planilhaFile);
+    fd.append('pedidos', JSON.stringify(itens));
+    fd.append('responsavel', document.getElementById('resp').value);
+
+    const r = await fetch("{% url 'gravar_na_planilha' %}", {
+      method: 'POST',
+      headers: { 'X-CSRFToken': csrf },
+      body: fd
+    });
+
+    if (!r.ok) {
+      const err = await r.json();
+      document.getElementById('stGrv').innerText = 'Erro: ' + (err.erro || 'Falha na gravação.');
+      return;
+    }
+
+    const inseridos = r.headers.get('X-Inseridos') || '0';
+    const duplicados = r.headers.get('X-Duplicados') || '0';
+    const prox = r.headers.get('X-Proxima-Linha') || '';
+
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = planilhaFile.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+
+    // Atualiza referencia local para permitir novas gravacoes seguidas sem reenviar o arquivo antigo
+    planilhaFile = new File([blob], planilhaFile.name, { type: planilhaFile.type });
+    document.getElementById('stGrv').innerText =
+      `Concluído e baixado! Inseridos: ${inseridos} | Duplicados ignorados: ${duplicados} | Próxima linha livre: ${prox}`;
+    itens = [];
+    render();
+  } catch (e) {
+    document.getElementById('stGrv').innerText = 'Erro de conexão: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+</script>
+</body>
+</html>

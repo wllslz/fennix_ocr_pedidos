@@ -84,3 +84,10 @@ if IS_VERCEL:
     DATABASES["default"]["NAME"] = "/tmp/db.sqlite3"
     MEDIA_ROOT = Path("/tmp/media")
     os.makedirs(MEDIA_ROOT, exist_ok=True)
+
+
+import os, tempfile
+ALLOWED_HOSTS = ["*"]
+CSRF_TRUSTED_ORIGINS = ["https://*.vercel.app", "http://127.0.0.1:8000", "http://localhost:8000"]
+SESSION_ENGINE = "django.contrib.sessions.backends.signed_cookies"
+MEDIA_ROOT = os.path.join(tempfile.gettempdir(), "fennix_media")
