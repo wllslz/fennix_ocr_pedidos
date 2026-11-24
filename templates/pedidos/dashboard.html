@@ -95,94 +95,114 @@ document.getElementById('fXls').onchange = async e => {
 
 function parseNumBR(str) {
   let s = String(str).trim();
-  // Se o OCR trocou vírgula por espaço (ex: "20 16"), converte para "20.16"
-  if (/^\d{1,5}\s+\d{2}$/.test(s)) {
-    s = s.replace(/\s+/, '.');
-  }
+  if (/^\d{1,5}\s+\d{2}$/.test(s)) s = s.replace(/\s+/, '.');
   s = s.replace(/[^\d,.]/g, '');
   if (s.includes(',') && s.includes('.')) s = s.replace(/\./g, '').replace(',', '.');
   else if (s.includes(',')) s = s.replace(',', '.');
   return parseFloat(s);
 }
 
-function preprocessarImagem(file) {
+function carregarImagem(file) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
-    img.onload = () => {
-      const scale = 2.5;
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      const ctx = canvas.getContext('2d');
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imgData.data;
-      const contrast = 1.3;
-      const intercept = 128 * (1 - contrast);
-
-      for (let i = 0; i < data.length; i += 4) {
-        const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        const adj = Math.min(255, Math.max(0, gray * contrast + intercept));
-        data[i] = data[i + 1] = data[i + 2] = adj;
-      }
-      ctx.putImageData(imgData, 0, 0);
-      URL.revokeObjectURL(url);
-      resolve(canvas);
-    };
-    img.onerror = err => {
-      URL.revokeObjectURL(url);
-      reject(err);
-    };
+    img.onload = () => { URL.revokeObjectURL(url); resolve(img); };
+    img.onerror = err => { URL.revokeObjectURL(url); reject(err); };
     img.src = url;
   });
 }
 
-function extrairCamposTexto(texto) {
-  // 1. Número do Pedido
-  let mPed = texto.match(/(?:Pedido|Ped\.?|N[ºo°]\s*Pedido)\s*[:#-]?\s*(\d{7,12})/i) || texto.match(/\b(47\d{8})\b/);
+// Gera canvas recortado e ampliado com opção de binarização (limiarização)
+function gerarCanvasRecorte(img, yStartRatio, yEndRatio, scale, binarizar) {
+  const sy = Math.floor(img.height * yStartRatio);
+  const sh = Math.ceil(img.height * (yEndRatio - yStartRatio));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(img.width * scale);
+  canvas.height = Math.round(sh * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.drawImage(img, 0, sy, img.width, sh, 0, 0, canvas.width, canvas.height);
+
+  const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = imgData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    let val;
+    if (binarizar) {
+      val = gray < 175 ? 0 : 255;
+    } else {
+      val = Math.min(255, Math.max(0, (gray - 128) * 1.35 + 128));
+    }
+    d[i] = d[i + 1] = d[i + 2] = val;
+  }
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
+}
+
+function buscarPesoNoTexto(texto) {
+  const padroes = [
+    // 1. Palavra Peso (ou variação OCR) seguida do número
+    /(?:P[eao]s[oa]|[eao]s[oa])(?:\s*Total|\s*Bruto|\s*L[ií]q\.?)?\s*[:\-]?\s*(\d{1,5}(?:[.,]|\s+)\d{2,3})/i,
+    // 2. Entre N.Itens e Total na linha do rodapé
+    /Itens\s*[:\-]?\s*\d+[^\n\r]{0,40}?(\d{1,5}(?:[.,]|\s+)\d{2,3})(?:\s*K\w*)?[^\n\r]{0,30}?Total/i,
+    // 3. Número decimal seguido de Kg / Kq / K + letra
+    /(\d{1,5}(?:[.,]|\s+)\d{2,3})\s*K[a-z0-9]{1,2}\b/i
+  ];
+  for (const rx of padroes) {
+    const m = texto.match(rx);
+    if (m) return parseNumBR(m[1]);
+  }
+  return null;
+}
+
+async function processarPrint(file) {
+  const img = await carregarImagem(file);
+
+  // Passe 1: Imagem inteira ampliada 2x para Cabeçalho (Pedido, Cliente, Data) + tentativa geral
+  const canvasFull = gerarCanvasRecorte(img, 0, 1, 2.0, false);
+  const resFull = await Tesseract.recognize(canvasFull, 'por');
+  const txtFull = resFull.data.text;
+
+  let mPed = txtFull.match(/(?:Pedido|Ped\.?|N[ºo°]\s*Pedido)\s*[:#-]?\s*(\d{7,12})/i) || txtFull.match(/\b(47\d{8})\b/);
   if (!mPed) throw new Error('Número do pedido não encontrado.');
 
-  // 2. Código e Nome do Cliente
-  let mCli = texto.match(/Cliente\s*[:\-]?\s*(\d{2,8})\s*[-–—]\s*([^\n\r]+)/i) || texto.match(/\b(\d{4,6})\s*[-–—]\s*([A-ZÀ-Ú0-9 .,&/-]{4,})/);
+  let mCli = txtFull.match(/Cliente\s*[:\-]?\s*(\d{2,8})\s*[-–—]\s*([^\n\r]+)/i) || txtFull.match(/\b(\d{4,6})\s*[-–—]\s*([A-ZÀ-Ú0-9 .,&/-]{4,})/);
   if (!mCli) throw new Error('Código do cliente não encontrado.');
 
-  // 3. Peso Total (múltiplas estratégias para vencer a linha dupla abaixo de "Peso: 20,16 Kg")
-  let mPeso =
-    // Estratégia A: palavra Peso (ou variação OCR Pesa/Poso/Eso) seguida de número com vírgula/ponto/espaço
-    texto.match(/(?:P[eao]s[oa]|[eao]s[oa])(?:\s*Total|\s*Bruto|\s*L[ií]q\.?)?\s*[:\-]?\s*(\d{1,5}(?:[.,]|\s+)\d{2,3})/i)
-    // Estratégia B: contexto estrutural da linha "N.Itens: <n> ... <peso> ... Total"
-    || texto.match(/Itens\s*[:\-]?\s*\d+[^\n\r]{0,35}?(\d{1,5}(?:[.,]|\s+)\d{2,3})(?:\s*K\w*)?[^\n\r]{0,25}?Total/i)
-    // Estratégia C: número seguido de Kg/Kq/K + qualquer letra
-    || texto.match(/(\d{1,5}(?:[.,]|\s+)\d{2,3})\s*K[a-z0-9]{1,2}\b/i);
+  let mData = txtFull.match(/\b(\d{2}\/\d{2}\/20\d{2})\b/);
+  const hoje = new Date().toLocaleDateString('pt-BR');
 
-  if (!mPeso) {
-    const trecho = texto.replace(/\s+/g, ' ').slice(0, 260);
-    throw new Error(`Peso (Kg) não encontrado. Texto lido pelo OCR: "${trecho}"`);
+  // Passe 2: Recorte exclusivo da metade inferior (rodapé) ampliado 4x + binarizado com PSM 6 (bloco único de texto)
+  const canvasRodape = gerarCanvasRecorte(img, 0.45, 1.0, 4.0, true);
+  const resRodape = await Tesseract.recognize(canvasRodape, 'por', {
+    tessedit_pageseg_mode: '6'
+  });
+  const txtRodape = resRodape.data.text;
+  const textoCombinado = txtRodape + "\n" + txtFull;
+
+  let peso = buscarPesoNoTexto(txtRodape) ?? buscarPesoNoTexto(txtFull);
+  if (peso === null || isNaN(peso)) {
+    const dbg = txtRodape.replace(/\s+/g, ' ').trim();
+    throw new Error(`Peso (Kg) não encontrado no rodapé. Leitura do rodapé: "${dbg}"`);
   }
 
-  // 4. Valor Total
-  let mVal = texto.match(/(?:Valor\s*Total|Total\s*(?:do\s*Pedido|Geral|L[ií]quido)?)\s*[:\-]?\s*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+[.,]\d{2})/i);
+  let mVal = textoCombinado.match(/(?:Valor\s*Total|Total\s*(?:do\s*Pedido|Geral|L[ií]quido)?)\s*[:\-]?\s*(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2}|\d+[.,]\d{2})/i);
   let valor = 0;
   if (mVal) {
     valor = parseNumBR(mVal[1]);
   } else {
-    const todos = [...texto.matchAll(/(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})/g)].map(m => parseNumBR(m[1]));
+    const todos = [...textoCombinado.matchAll(/(?:R\$\s*)?(\d{1,3}(?:\.\d{3})*,\d{2})/g)]
+      .map(m => parseNumBR(m[1]))
+      .filter(v => Math.abs(v - peso) > 0.001);
     if (!todos.length) throw new Error('Valor total não encontrado.');
     valor = Math.max(...todos);
   }
-
-  // 5. Data do Pedido
-  let mData = texto.match(/\b(\d{2}\/\d{2}\/20\d{2})\b/);
-  const hoje = new Date().toLocaleDateString('pt-BR');
 
   return {
     codigo_cliente: parseInt(mCli[1], 10),
     nome_cliente: mCli[2].trim(),
     numero_pedido: parseInt(mPed[1], 10),
-    peso_total: parseNumBR(mPeso[1]),
+    peso_total: peso,
     valor_total: valor,
     data_pedido: mData ? mData[1] : hoje,
     tipo_expedicao: 'LOJA'
@@ -191,12 +211,11 @@ function extrairCamposTexto(texto) {
 
 async function lerImgs(files) {
   if (!files || !files.length) return;
-  document.getElementById('stIa').innerText = `Processando ${files.length} print(s)...`;
+  document.getElementById('stIa').innerText = `Analisando cabeçalho e rodapé de ${files.length} print(s)...`;
   for (const f of files) {
     try {
-      const canvas = await preprocessarImagem(f);
-      const { data: { text } } = await Tesseract.recognize(canvas, 'por');
-      itens.push(extrairCamposTexto(text));
+      const dados = await processarPrint(f);
+      itens.push(dados);
     } catch (e) {
       alert(`Erro ao ler ${f.name || 'print'}: ${e.message}`);
     }
