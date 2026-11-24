@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><title>Fennix Expedição</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0f172a;color:#f8fafc;margin:0;padding:24px}
+.box{max-width:1100px;margin:auto}.card{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:20px;margin-bottom:18px}
+.drop{border:2px dashed #475569;border-radius:8px;padding:26px;text-align:center;cursor:pointer}.drop:hover{border-color:#38bdf8}
+table{width:100%;border-collapse:collapse;margin-top:12px}th,td{border-bottom:1px solid #334155;padding:8px;text-align:left}
+input{background:#0f172a;border:1px solid #475569;color:#fff;padding:6px;border-radius:4px;width:90%}
+button{background:#2563eb;color:#fff;border:none;padding:9px 16px;border-radius:6px;cursor:pointer;font-weight:600}
+button.ok{background:#16a34a}button.del{background:#dc2626;padding:5px 9px}.st{margin-top:10px;color:#38bdf8}
+</style></head><body><div class="box"><h1>Fennix Expedição — Cadastro Automático</h1>
+<div class="card"><h3>1. Planilha Base (.xlsx)</h3>
+<input type="file" id="fXls" accept=".xlsx" style="width:auto">
+<a href="{% url 'baixar_planilha' %}" id="btnDl" style="display:{% if planilha_ativa %}inline-block{% else %}none{% endif %}"><button type="button" class="ok">Baixar Planilha Atualizada</button></a>
+<div id="stXls" class="st">{% if resumo %}Ativa: <b>{{ planilha_ativa }}</b> | Aba: <b>{{ resumo.aba_alvo }}</b> | Próxima linha: <b>{{ resumo.proxima_linha }}</b>{% else %}Selecione a planilha oficial.{% endif %}</div></div>
+<div class="card"><h3>2. Prints de Pedidos (Clique, Arraste ou Ctrl + V)</h3>
+<div class="drop" onclick="document.getElementById('fImg').click()">Clique aqui ou pressione <b>Ctrl + V</b> para colar prints<input type="file" id="fImg" accept="image/*" multiple hidden></div>
+<div id="stIa" class="st"></div></div>
+<div class="card"><h3>3. Conferência antes de Gravar</h3>
+Conferente (Col K): <input type="text" id="resp" placeholder="Ex: Willian" style="width:200px">
+<button type="button" class="ok" onclick="gravar()">Gravar na Aba BASE</button>
+<table><thead><tr><th>Data</th><th>Cód. Cliente</th><th>Cliente</th><th>Pedido</th><th>Peso (Kg)</th><th>Valor</th><th>Tipo</th><th></th></tr></thead><tbody id="tb"></tbody></table>
+<div id="stGrv" class="st"></div></div></div>
+<script>
+const csrf='{{ csrf_token }}';let itens=[];
+document.getElementById('fXls').onchange=async e=>{
+  const f=e.target.files[0];if(!f)return;const fd=new FormData();fd.append('planilha',f);
+  document.getElementById('stXls').innerText='Analisando planilha...';
+  const r=await fetch("{% url 'upload_planilha' %}",{method:'POST',headers:{'X-CSRFToken':csrf},body:fd});const d=await r.json();
+  document.getElementById('stXls').innerHTML=r.ok?`${d.mensagem} | Próxima linha: <b>${d.resumo.proxima_linha}</b>`:d.erro;
+  if(r.ok)document.getElementById('btnDl').style.display='inline-block';
+};
+async function lerImgs(files){
+  if(!files.length)return;const fd=new FormData();
+  for(const f of files)fd.append('imagens',f,f.name&&f.name!=='image.png'?f.name:`print_${Date.now()}.png`);
+  document.getElementById('stIa').innerText='Extraindo dados via Gemini IA...';
+  const r=await fetch("{% url 'processar_imagens_ia' %}",{method:'POST',headers:{'X-CSRFToken':csrf},body:fd});const d=await r.json();
+  if(!r.ok){document.getElementById('stIa').innerText=d.erro;return;}
+  d.pedidos.forEach(p=>p.sucesso?itens.push(p):alert(p.erro));
+  document.getElementById('stIa').innerText=`${itens.length} pedido(s) prontos para conferir.`;render();
+}
+document.getElementById('fImg').onchange=e=>lerImgs(e.target.files);
+document.onpaste=e=>{const imgs=[...(e.clipboardData?.items||[])].filter(i=>i.type.startsWith('image/')).map(i=>i.getAsFile());if(imgs.length)lerImgs(imgs);};
+function render(){
+  document.getElementById('tb').innerHTML=itens.map((p,i)=>`<tr>
+  <td><input value="${p.data_pedido}" onchange="itens[${i}].data_pedido=this.value"></td>
+  <td><input type="number" value="${p.codigo_cliente}" onchange="itens[${i}].codigo_cliente=+this.value"></td>
+  <td>${p.nome_cliente||''}</td>
+  <td><input type="number" value="${p.numero_pedido}" onchange="itens[${i}].numero_pedido=+this.value"></td>
+  <td><input type="number" step="0.01" value="${p.peso_total}" onchange="itens[${i}].peso_total=+this.value"></td>
+  <td><input type="number" step="0.01" value="${p.valor_total}" onchange="itens[${i}].valor_total=+this.value"></td>
+  <td><input value="${p.tipo_expedicao||'LOJA'}" onchange="itens[${i}].tipo_expedicao=this.value"></td>
+  <td><button class="del" onclick="itens.splice(${i},1);render()">X</button></td></tr>`).join('');
+}
+async function gravar(){
+  if(!itens.length)return alert('Sem pedidos na tabela.');
+  const r=await fetch("{% url 'gravar_na_planilha' %}",{method:'POST',headers:{'Content-Type':'application/json','X-CSRFToken':csrf},body:JSON.stringify({pedidos:itens,responsavel:document.getElementById('resp').value})});
+  const d=await r.json();
+  if(r.ok){document.getElementById('stGrv').innerText=`Gravados: ${d.resultado.inseridos} | Duplicados ignorados: ${d.resultado.ignorados_duplicados.length} | Próxima linha: ${d.resumo.proxima_linha}`;itens=[];render();}
+  else document.getElementById('stGrv').innerText=d.erro;
+}
+</script></body></html>
