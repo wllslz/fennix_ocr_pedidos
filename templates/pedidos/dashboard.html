@@ -33,7 +33,7 @@ document.getElementById('fXls').onchange=async e=>{
 async function lerImgs(files){
   if(!files.length)return;const fd=new FormData();
   for(const f of files)fd.append('imagens',f,f.name&&f.name!=='image.png'?f.name:`print_${Date.now()}.png`);
-  document.getElementById('stIa').innerText='Extraindo dados via Gemini IA...';
+  document.getElementById('stIa').innerText='Extraindo dados via Tesseract OCR...';
   const r=await fetch("{% url 'processar_imagens_ia' %}",{method:'POST',headers:{'X-CSRFToken':csrf},body:fd});const d=await r.json();
   if(!r.ok){document.getElementById('stIa').innerText=d.erro;return;}
   d.pedidos.forEach(p=>p.sucesso?itens.push(p):alert(p.erro));
