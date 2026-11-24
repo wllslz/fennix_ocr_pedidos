@@ -44,7 +44,7 @@
     <button type="button" class="ok" id="btnGravar" onclick="gravar()">Gravar na Aba BASE e Baixar .xlsx</button>
     <table>
       <thead>
-        <tr><th>Data</th><th>Cód. Cliente</th><th>Cliente</th><th>Pedido</th><th>Peso (Kg)</th><th>Valor</th><th>Tipo</th><th></th></tr>
+        <tr><th>Cód. Cliente</th><th>Pedido</th><th>Peso (Kg)</th><th>Valor</th><th>Tipo</th><th></th></tr>
       </thead>
       <tbody id="tb"></tbody>
     </table>
@@ -301,12 +301,7 @@ function render() {
       tr.appendChild(td);
     };
 
-    addInput('text', p.data_pedido, 'data_pedido');
     addInput('number', p.codigo_cliente, 'codigo_cliente');
-
-    const tdCli = document.createElement('td');
-    tdCli.textContent = p.nome_cliente || '';
-    tr.appendChild(tdCli);
 
     addInput('number', p.numero_pedido, 'numero_pedido');
     addInput('number', p.peso_total, 'peso_total', '0.01');
@@ -354,18 +349,12 @@ function gravar() {
       continue;
     }
 
-    const [dd, mm, yyyy] = (p.data_pedido || '').split('/').map(Number);
-    const dt = (dd && mm && yyyy) ? new Date(yyyy, mm - 1, dd) : new Date();
-
     const setCell = (c, val, tipo, fmt) => {
       const addr = XLSX.utils.encode_cell({ r, c });
       if (!ws[addr]) ws[addr] = { t: tipo, v: val };
       else { ws[addr].t = tipo; ws[addr].v = val; }
       if (fmt) ws[addr].z = fmt;
     };
-
-    if (!ws[XLSX.utils.encode_cell({ r, c: 0 })]?.v) setCell(0, dt, 'd', 'dd/mm/yyyy');
-    if (!ws[XLSX.utils.encode_cell({ r, c: 1 })]?.v) setCell(1, MESES_PT[dt.getMonth()], 's');
     setCell(2, Number(p.codigo_cliente), 'n');
     setCell(3, Number(p.peso_total), 'n', '0.00');
     setCell(4, Number(p.valor_total), 'n', '#,##0.00');
