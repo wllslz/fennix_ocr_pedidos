@@ -20,7 +20,7 @@ def extrair_dados_pedido_ia(caminho_imagem: str) -> dict:
     client = genai.Client(api_key=api_key)
     prompt = "Extraia codigo_cliente (apenas digitos antes do traco), nome_cliente, numero_pedido, peso_total, valor_total, data_pedido e tipo_expedicao deste espelho de pedido FENNIX BRASIL."
     resp = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.8-flash",
         contents=[Image.open(caminho_imagem), prompt],
         config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=PedidoExtraidoSchema, temperature=0.0),
     )
