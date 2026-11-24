@@ -1,3 +1,5 @@
 {
-  "outputDirectory": "public"
+  "$schema": "[https://openapi.vercel.sh/vercel.json](https://openapi.vercel.sh/vercel.json)",
+  "outputDirectory": "public",
+  "cleanUrls": true
 }
