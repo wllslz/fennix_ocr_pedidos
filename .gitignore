@@ -8,3 +8,6 @@ media/
 !media/planilhas_base/
 !media/planilhas_base/MANITORAMENTO_EXPEDICAO_PADRAO.xlsx
 .env
+
+.vercel
+.env*
