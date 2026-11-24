@@ -112,8 +112,17 @@ document.getElementById('fXls').onchange = async e => {
   }
 };
 
+function corrigirDigitosOCR(str) {
+  return String(str)
+    .replace(/[OoQD]/g, '0')
+    .replace(/[Il|!]/g, '1')
+    .replace(/[Zz]/g, '2')
+    .replace(/[Ss]/g, '5')
+    .replace(/[Bb]/g, '8');
+}
+
 function parseNumBR(str) {
-  let s = String(str).trim();
+  let s = corrigirDigitosOCR(str).trim();
   if (/^\d{1,5}\s+\d{2}$/.test(s)) s = s.replace(/\s+/, '.');
   s = s.replace(/[^\d,.]/g, '');
   if (s.includes(',') && s.includes('.')) s = s.replace(/\./g, '').replace(',', '.');
@@ -175,8 +184,10 @@ async function processarPrint(file) {
   const resFull = await worker.recognize(canvasFull);
   const txtFull = resFull.data.text;
 
-  const mPed = txtFull.match(/(?:Pedido|Ped\.?|N[ºo°]\s*Pedido)\s*[:#-]?\s*(\d{7,12})/i) || txtFull.match(/\b(47\d{8})\b/);
-  if (!mPed) throw new Error('Número do pedido não encontrado.');
+  const mPedRaw = txtFull.match(/(?:Ped[i1l]d[o0]|Ped\.?|N[ºo°]\s*Ped[i1l]d[o0])\s*[:#-]?\s*([0-9OoIlSsBb]{7,12})/i)
+               || txtFull.match(/\b(47[0-9OoIlSsBb]{8})\b/);
+  const pedLimpo = mPedRaw ? corrigirDigitosOCR(mPedRaw[1]).replace(/\D/g, '') : '';
+  if (!pedLimpo) throw new Error('Número do pedido não encontrado.');
 
   const mCli = txtFull.match(/Cliente\s*[:\-]?\s*(\d{2,8})\s*[-–—]\s*([^\n\r]+)/i) || txtFull.match(/\b(\d{4,6})\s*[-–—]\s*([A-ZÀ-Ú0-9 .,&/-]{4,})/);
   if (!mCli) throw new Error('Código do cliente não encontrado.');
@@ -215,7 +226,7 @@ async function processarPrint(file) {
   return {
     codigo_cliente: parseInt(mCli[1], 10),
     nome_cliente: mCli[2].trim(),
-    numero_pedido: parseInt(mPed[1], 10),
+    numero_pedido: parseInt(pedLimpo, 10),
     peso_total: peso,
     valor_total: valor,
     data_pedido: mData ? mData[1] : hoje,
