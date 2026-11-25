@@ -531,18 +531,35 @@
       return s;
     }
 
+    /**
+     * Escolhe o número do pedido priorizando candidatos ancorados no rótulo "Pedido"
+     * e evitando números de telefone (ex: 92981042565) ou CNPJ.
+     */
     function escolherMelhorPedido(candidatos) {
-      const validos = (candidatos || [])
-        .map((c) => String(c || "").replace(/\D/g, ""))
-        .filter((d) => d.length >= 6 && d.length <= 14);
-      if (validos.length === 0) return "";
-      // Prioriza fortemente números completos (9 a 12 dígitos) sobre fragmentos cortados (6 dígitos)
-      validos.sort((a, b) => {
-        const scoreA = a.length >= 9 && a.length <= 12 ? 100 + a.length : a.length;
-        const scoreB = b.length >= 9 && b.length <= 12 ? 100 + b.length : b.length;
+      const lista = Array.isArray(candidatos) ? candidatos : [];
+      const filtrados = lista
+        .map((item) => {
+          if (typeof item === "string") {
+            return { digits: item.replace(/\D/g, ""), isAnchored: false };
+          }
+          return {
+            digits: String(item?.digits || "").replace(/\D/g, ""),
+            isAnchored: Boolean(item?.isAnchored)
+          };
+        })
+        .filter((x) => x.digits.length >= 6 && x.digits.length <= 14);
+
+      if (filtrados.length === 0) return "";
+
+      filtrados.sort((a, b) => {
+        const lenScoreA = a.digits.length >= 9 && a.digits.length <= 12 ? 50 + a.digits.length : a.digits.length;
+        const lenScoreB = b.digits.length >= 9 && b.digits.length <= 12 ? 50 + b.digits.length : b.digits.length;
+        const scoreA = (a.isAnchored ? 500 : 0) + lenScoreA;
+        const scoreB = (b.isAnchored ? 500 : 0) + lenScoreB;
         return scoreB - scoreA;
       });
-      return validos[0];
+
+      return filtrados[0].digits;
     }
 
     function detectarBandasDinamicas(ocrData, imgWidth, imgHeight) {
@@ -558,7 +575,7 @@
         const xMid = ((bbox.x0 + bbox.x1) / 2) / Math.max(1, imgWidth);
         const yMid = ((bbox.y0 + bbox.y1) / 2) / Math.max(1, imgHeight);
 
-        if (yMid < 0.45 && xMid > 0.35 && /^ped[a-z0-9]{2,4}:?$/.test(txt)) {
+        if (yMid < 0.35 && xMid > 0.35 && /^ped[a-z0-9]{2,4}:?$/.test(txt)) {
           pedidoBox = {
             xNorm: bbox.x0 / Math.max(1, imgWidth),
             yNorm: yMid,
@@ -587,6 +604,16 @@
       return { resumoY, pedidoBox };
     }
 
+    function palavraPertoDeTelefoneOuCnpj(word, allWords) {
+      const near = allWords.filter(
+        (o) =>
+          o !== word &&
+          Math.abs(o.yMid - word.yMid) <= Math.max(word.h, o.h) * 1.4 &&
+          Math.abs(o.xMid - word.xMid) <= Math.max(word.h, o.h) * 14
+      );
+      return near.some((o) => /^(fone|tel|celular|cnpj|insc\.?):?$/i.test(o.lower));
+    }
+
     function extrairPorGeometria(ocrData, imgWidth, imgHeight, modoTopo = false) {
       const words = Array.isArray(ocrData?.words) ? ocrData.words : [];
       if (words.length === 0) return {};
@@ -603,6 +630,7 @@
             y0,
             x1,
             y1,
+            xMid: (x0 + x1) / 2,
             yMid: (y0 + y1) / 2,
             h: Math.max(8, y1 - y0),
             xNorm: ((x0 + x1) / 2) / Math.max(1, imgWidth),
@@ -620,8 +648,8 @@
       let peso = "";
       let total = "";
 
-      // 1. Pedido por âncora: junta blocos numéricos consecutivos na mesma linha (ex: "4491" + "002666")
-      const pedidoAnchor = normWords.find((w) => (modoTopo || w.yNorm < 0.45) && /^ped[a-z0-9]{2,4}:?$/.test(w.lower));
+      // 1. Pedido por âncora: junta blocos numéricos consecutivos na mesma linha (ex: "4771" + "000453")
+      const pedidoAnchor = normWords.find((w) => (modoTopo || w.yNorm < 0.35) && /^ped[a-z0-9]{2,4}:?$/.test(w.lower));
       if (pedidoAnchor) {
         const direita = normWords
           .filter((w) => w !== pedidoAnchor && mesmaLinha(pedidoAnchor, w, 1.3))
@@ -637,7 +665,7 @@
           if (digits.length > 0 && digits.length === cand.text.length) {
             acumulado += digits;
             if (acumulado.length >= 6 && acumulado.length <= 14) {
-              candidatosPedido.push(acumulado);
+              candidatosPedido.push({ digits: acumulado, isAnchored: true });
             }
           } else if (acumulado.length >= 6) {
             break;
@@ -645,13 +673,14 @@
         }
       }
 
-      // 1b. Sequência numérica longa (8..14 dígitos) no topo direito
+      // 1b. Sequência numérica longa (8..13 dígitos) no topo superior (ignora telefones e CNPJ)
       for (const w of normWords) {
-        if (!modoTopo && (w.yNorm > 0.35 || w.xNorm < 0.40)) continue;
+        if (!modoTopo && (w.yNorm > 0.24 || w.xNorm < 0.42)) continue;
         if (w.text.includes("/") || w.text.includes(".") || w.text.includes("-")) continue;
+        if (palavraPertoDeTelefoneOuCnpj(w, normWords)) continue;
         const d = w.text.replace(/\D/g, "");
-        if (d.length >= 8 && d.length <= 14) {
-          candidatosPedido.push(d);
+        if (d.length >= 8 && d.length <= 13) {
+          candidatosPedido.push({ digits: d, isAnchored: false });
         }
       }
 
@@ -709,16 +738,21 @@
       const combinado = `${textoTopoDir}\n${textoResumo}\n${textoCompleto}`.replace(/\r/g, "\n");
       const candidatosPedido = [];
 
-      // Captura Pedido mesmo se houver espaço interno entre grupos de dígitos (ex: "Pedido 4491 002666")
       for (const fonte of [textoTopoDir, combinado]) {
         const mRotulo = fonte.match(/Ped[a-z0-9]{2,4}[^\d\n]{0,20}((?:\d[\t ]*){6,14})\b/i);
         if (mRotulo?.[1]) {
-          candidatosPedido.push(mRotulo[1].replace(/\D/g, ""));
-        }
-        for (const mLong of fonte.matchAll(/\b(\d{8,14})\b/g)) {
-          candidatosPedido.push(mLong[1]);
+          candidatosPedido.push({ digits: mRotulo[1].replace(/\D/g, ""), isAnchored: true });
         }
       }
+
+      const linhasTopo = textoTopoDir.split("\n");
+      for (const linha of linhasTopo) {
+        if (/fone|tel|celular|cnpj|insc/i.test(linha)) continue;
+        for (const mLong of linha.matchAll(/\b(\d{8,13})\b/g)) {
+          candidatosPedido.push({ digits: mLong[1], isAnchored: false });
+        }
+      }
+
       const pedido = escolherMelhorPedido(candidatosPedido);
 
       // 2. Cliente
@@ -798,19 +832,19 @@
       const geoFull = extrairPorGeometria(fullRes.data, fullPrep.width, fullPrep.height, false);
       const bandas = detectarBandasDinamicas(fullRes.data, fullPrep.width, fullPrep.height);
 
-      // Passada 2: Recorte cirúrgico na linha do Pedido (PSM 7 linha única) ou bloco superior direito
+      // Passada 2: Recorte cirúrgico na linha do Pedido (PSM 7 linha única) ou faixa superior direita (acima de Data pedido)
       etapaOcrBasePct = 40;
       etapaOcrFaixaPct = 30;
       let topoDirPrep;
       let topoPsm = "6";
       if (bandas.pedidoBox) {
-        const rx = Math.max(0.35, bandas.pedidoBox.xNorm - 0.03);
-        const ry = Math.max(0, bandas.pedidoBox.yNorm - Math.max(0.028, bandas.pedidoBox.hNorm * 1.4));
-        const rh = Math.max(0.06, bandas.pedidoBox.hNorm * 2.8);
+        const rx = Math.max(0.40, bandas.pedidoBox.xNorm - 0.03);
+        const ry = Math.max(0, bandas.pedidoBox.yNorm - Math.max(0.025, bandas.pedidoBox.hNorm * 1.3));
+        const rh = Math.max(0.055, bandas.pedidoBox.hNorm * 2.5);
         topoDirPrep = criarRecorteAdaptativo(img, rx, ry, 1.0 - rx, rh, 2200, 28, 0.45);
         topoPsm = "7";
       } else {
-        topoDirPrep = criarRecorteAdaptativo(img, 0.40, 0.04, 0.60, 0.28, 2600, 28, 0.45);
+        topoDirPrep = criarRecorteAdaptativo(img, 0.42, 0.04, 0.58, 0.16, 2600, 28, 0.45);
         topoPsm = "6";
       }
       await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: topoPsm });
@@ -837,9 +871,9 @@
       );
 
       const melhorPedido = escolherMelhorPedido([
-        geoTopo.pedido,
-        geoFull.pedido,
-        txtMerged.pedido
+        { digits: geoTopo.pedido, isAnchored: true },
+        { digits: geoFull.pedido, isAnchored: true },
+        { digits: txtMerged.pedido, isAnchored: true }
       ]);
 
       const resultado = {
