@@ -81,7 +81,7 @@
 <body>
   <div class="container">
     <h1>Fennix OCR Pedidos</h1>
-    <p class="sub">Preenche a próxima linha ativa da aba <strong>BASE </strong> no formato exato (colunas A a M) mantendo XML e abas intactas. Suporta seleção, <strong>Ctrl + V</strong> e inspeção ampliada da imagem.</p>
+    <p class="sub">Preenche a próxima linha ativa da aba <strong>BASE</strong> no formato exato (colunas A a M) mantendo XML e abas intactas. Suporta seleção, <strong>Ctrl + V</strong> e inspeção ampliada da imagem.</p>
 
     <div class="grid">
       <div class="card">
@@ -180,9 +180,9 @@
   </div>
 
   <script>
-    const TARGET_SHEET_NAME = "BASE ";
     let zipInstance = null;
     let baseSheetPath = null;
+    let nomeAbaEncontrada = "BASE";
     let sharedStringsList = [];
     let arquivoOriginalNome = "planilha_atualizada.xlsx";
     let pedidosAdicionados = [];
@@ -236,6 +236,10 @@
       return `xl/${limpo}`;
     }
 
+    function normalizarNomeAba(nome) {
+      return String(nome || "").replace(/\s+/g, " ").trim().toLowerCase();
+    }
+
     async function carregarSharedStrings(zip) {
       const ssXml = await zip.file("xl/sharedStrings.xml")?.async("string");
       if (!ssXml) return [];
@@ -258,9 +262,20 @@
       const relsDoc = parser.parseFromString(relsXml, "application/xml");
 
       const sheets = Array.from(wbDoc.getElementsByTagName("sheet"));
-      const abaAlvo = sheets.find((s) => s.getAttribute("name") === TARGET_SHEET_NAME);
+      const nomesDisponiveis = sheets.map((s) => s.getAttribute("name") || "");
+
+      let abaAlvo = sheets.find((s) => normalizarNomeAba(s.getAttribute("name")) === "base");
       if (!abaAlvo) {
-        throw new Error(`Aba "${TARGET_SHEET_NAME}" não foi encontrada na planilha.`);
+        abaAlvo = sheets.find((s) => {
+          const n = normalizarNomeAba(s.getAttribute("name"));
+          return n.startsWith("base") && !n.includes("2");
+        });
+      }
+
+      if (!abaAlvo) {
+        throw new Error(
+          `Aba "BASE" não foi encontrada na planilha. Abas disponíveis: ${nomesDisponiveis.join(", ") || "nenhuma"}.`
+        );
       }
 
       const rId = abaAlvo.getAttribute("r:id");
@@ -270,7 +285,10 @@
         throw new Error("Relacionamento da aba BASE não encontrado em workbook.xml.rels.");
       }
 
-      return normalizarCaminhoZip(rel.getAttribute("Target"));
+      return {
+        sheetPath: normalizarCaminhoZip(rel.getAttribute("Target")),
+        sheetName: abaAlvo.getAttribute("name") || "BASE"
+      };
     }
 
     xlsxInput.addEventListener("change", async (e) => {
@@ -281,14 +299,18 @@
         arquivoOriginalNome = file.name.replace(/\.xlsx$/i, "") + "_atualizado.xlsx";
         const buffer = await file.arrayBuffer();
         zipInstance = await JSZip.loadAsync(buffer);
-        baseSheetPath = await localizarAbaBase(zipInstance);
+        const infoAba = await localizarAbaBase(zipInstance);
+        baseSheetPath = infoAba.sheetPath;
+        nomeAbaEncontrada = infoAba.sheetName;
         sharedStringsList = await carregarSharedStrings(zipInstance);
         pedidosAdicionados = [];
         linhaNumeroLabel.textContent = "Nenhuma linha gravada ainda";
         linhaCelulasGrid.innerHTML = "";
         render();
         atualizarEstadoDownload();
-        setStatus(`Planilha carregada. Aba alvo: ${baseSheetPath} (colunas A..M). Adicione pelo menos 1 pedido para liberar o download.`);
+        setStatus(
+          `Planilha carregada. Aba detectada: "${nomeAbaEncontrada}" (${baseSheetPath}, colunas A..M). Adicione pelo menos 1 pedido para liberar o download.`
+        );
       } catch (err) {
         zipInstance = null;
         baseSheetPath = null;
@@ -327,7 +349,7 @@
     applyModalBtn.addEventListener("click", () => {
       document.getElementById("clienteInput").value = modalCliente.value.trim();
       document.getElementById("pedidoInput").value = modalPedido.value.trim();
-      document.getElementById("pesoInput").value = modalPeso.value.trim();
+      document.getElementById("pesoInput").value = normalizarPesoExtraido(modalPeso.value.trim());
       document.getElementById("totalInput").value = modalTotal.value.trim();
       fecharModalImagem();
     });
@@ -355,29 +377,36 @@
       });
     }
 
-    function criarRecorteProcessado(img, rx, ry, rw, rh, scale = 3) {
+    function criarRecorteProcessado(img, rx, ry, rw, rh, scale = 3.5, padPx = 24) {
       const sx = Math.max(0, Math.floor(img.width * rx));
       const sy = Math.max(0, Math.floor(img.height * ry));
       const sw = Math.max(1, Math.min(img.width - sx, Math.floor(img.width * rw)));
       const sh = Math.max(1, Math.min(img.height - sy, Math.floor(img.height * rh)));
 
+      const innerW = Math.max(1, Math.round(sw * scale));
+      const innerH = Math.max(1, Math.round(sh * scale));
+
       const canvas = document.createElement("canvas");
-      canvas.width = Math.max(1, Math.round(sw * scale));
-      canvas.height = Math.max(1, Math.round(sh * scale));
+      canvas.width = innerW + padPx * 2;
+      canvas.height = innerH + padPx * 2;
       const ctx = canvas.getContext("2d");
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
-      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, sx, sy, sw, sh, padPx, padPx, innerW, innerH);
 
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = imageData.data;
-      const contrast = 1.65;
+      const contrast = 1.75;
       const intercept = 128 * (1 - contrast);
 
       for (let i = 0; i < d.length; i += 4) {
         const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
         let adj = Math.min(255, Math.max(0, gray * contrast + intercept));
-        adj = adj < 155 ? Math.max(0, adj * 0.45) : Math.min(255, 255 - (255 - adj) * 0.35);
+        adj = adj < 160 ? 0 : 255;
         d[i] = adj;
         d[i + 1] = adj;
         d[i + 2] = adj;
@@ -399,12 +428,20 @@
       return ocrWorker;
     }
 
+    async function reconhecerRegiao(worker, imagemPrep, whitelist, psm) {
+      await worker.setParameters({
+        tessedit_char_whitelist: whitelist,
+        tessedit_pageseg_mode: String(psm)
+      });
+      const res = await worker.recognize(imagemPrep);
+      return (res.data?.text || "").trim();
+    }
+
     function normalizarPesoExtraido(rawPeso) {
       if (!rawPeso) return "";
       let limpo = String(rawPeso).trim().replace(/\s+/g, "");
       if (!limpo) return "";
 
-      // Se vier com separador decimal explícito (vírgula ou ponto), padroniza com vírgula
       if (/[.,]/.test(limpo)) {
         const partes = limpo.split(/[.,]/);
         if (partes.length === 2) {
@@ -414,7 +451,6 @@
         return `${partes.join("")},${dec}`;
       }
 
-      // Se o OCR omitiu a vírgula decimal em pesos com 2 casas (ex.: 9215 -> 92,15; 2016 -> 20,16)
       if (/^\d{4,5}$/.test(limpo)) {
         const inteiro = limpo.slice(0, -2);
         const decimal = limpo.slice(-2);
@@ -454,7 +490,6 @@
         clienteCodigo = candidatosCliente[0] || "";
       }
 
-      // Prioriza a linha de totais para evitar capturar "Peso" de descrições de itens
       let pesoBruto = "";
       const mPesoTotais = textoTotais.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
       if (mPesoTotais && mPesoTotais[1]) {
@@ -488,33 +523,35 @@
 
     async function processarPrint(itemImg) {
       const img = await carregarImagem(itemImg.dataUrl);
-      const fullPrep = criarRecorteProcessado(img, 0, 0, 1, 1, 2.5);
-      const topoDirPrep = criarRecorteProcessado(img, 0.55, 0.08, 0.45, 0.25, 3.5);
-      const clienteEsqPrep = criarRecorteProcessado(img, 0, 0.14, 0.65, 0.22, 3.5);
-      const totaisPrep = criarRecorteProcessado(img, 0.4, 0.36, 0.6, 0.16, 4.0);
+      const fullPrep = criarRecorteProcessado(img, 0, 0, 1, 1, 2.5, 16);
+      const topoDirPrep = criarRecorteProcessado(img, 0.55, 0.08, 0.45, 0.25, 4.0, 28);
+      const clienteEsqPrep = criarRecorteProcessado(img, 0, 0.14, 0.65, 0.22, 4.0, 28);
+      const totaisPrep = criarRecorteProcessado(img, 0.4, 0.36, 0.6, 0.16, 4.5, 28);
 
       const worker = await obterWorkerTesseract();
 
-      await worker.setParameters({ tessedit_char_whitelist: "" });
-      const fullRes = await worker.recognize(fullPrep);
+      const fullTxt = await reconhecerRegiao(worker, fullPrep, "", 6);
+      let topoDirTxt = await reconhecerRegiao(worker, topoDirPrep, "0123456789Pedido: ", 6);
+      if (!/\d{5,14}/.test(topoDirTxt)) {
+        topoDirTxt = await reconhecerRegiao(worker, topoDirPrep, "0123456789Pedido: ", 7);
+      }
 
-      await worker.setParameters({ tessedit_char_whitelist: "0123456789Pedido: " });
-      const topoDirRes = await worker.recognize(topoDirPrep);
+      let clienteEsqTxt = await reconhecerRegiao(worker, clienteEsqPrep, "0123456789Cliente- ", 6);
+      if (!/\d{2,10}/.test(clienteEsqTxt)) {
+        clienteEsqTxt = await reconhecerRegiao(worker, clienteEsqPrep, "0123456789Cliente- ", 7);
+      }
 
-      await worker.setParameters({ tessedit_char_whitelist: "0123456789Cliente- " });
-      const clienteEsqRes = await worker.recognize(clienteEsqPrep);
+      let totaisTxt = await reconhecerRegiao(worker, totaisPrep, "0123456789.,TotalPesoKg: ", 6);
+      if (!/\d/.test(totaisTxt)) {
+        totaisTxt = await reconhecerRegiao(worker, totaisPrep, "0123456789.,TotalPesoKg: ", 7);
+      }
 
-      await worker.setParameters({ tessedit_char_whitelist: "0123456789.,TotalPesoKg: " });
-      const totaisRes = await worker.recognize(totaisPrep);
+      await worker.setParameters({
+        tessedit_char_whitelist: "",
+        tessedit_pageseg_mode: "3"
+      });
 
-      await worker.setParameters({ tessedit_char_whitelist: "" });
-
-      const extraido = extrairDadosPedido(
-        fullRes.data?.text || "",
-        topoDirRes.data?.text || "",
-        clienteEsqRes.data?.text || "",
-        totaisRes.data?.text || ""
-      );
+      const extraido = extrairDadosPedido(fullTxt, topoDirTxt, clienteEsqTxt, totaisTxt);
 
       if (!extraido.pedido) {
         return {
@@ -528,7 +565,7 @@
 
     function renderUltimaLinha(item) {
       if (!item) return;
-      linhaNumeroLabel.textContent = `Linha ${item.linha} (${TARGET_SHEET_NAME.trim()} — A..M)`;
+      linhaNumeroLabel.textContent = `Linha ${item.linha} (${nomeAbaEncontrada} — A..M)`;
       const detalhes = [
         { ref: `A${item.linha}`, rotulo: "Data", val: item.dataDisplay || "-" },
         { ref: `B${item.linha}`, rotulo: "Mês", val: item.mesDisplay || "-" },
@@ -851,7 +888,7 @@
         document.getElementById("pesoInput").value = "";
         document.getElementById("totalInput").value = "";
 
-        setStatus(`Linha ${proximaLinha} preenchida na aba "${TARGET_SHEET_NAME}" (A..M) — A${proximaLinha}: ${dataSerial || "-"} | B${proximaLinha}: ${mesDisplay || "-"} | C${proximaLinha}: ${clienteStr || "-"} | D${proximaLinha}: ${pesoStr || "-"} | E${proximaLinha}: ${totalStr || "-"} | F${proximaLinha}: ${pedidoStr || "-"} | I${proximaLinha}: ${statusDisplay || "-"} | M${proximaLinha}: ${colMDisplay}. Botão de download liberado.`);
+        setStatus(`Linha ${proximaLinha} preenchida na aba "${nomeAbaEncontrada}" (A..M) — A${proximaLinha}: ${dataSerial || "-"} | B${proximaLinha}: ${mesDisplay || "-"} | C${proximaLinha}: ${clienteStr || "-"} | D${proximaLinha}: ${pesoStr || "-"} | E${proximaLinha}: ${totalStr || "-"} | F${proximaLinha}: ${pedidoStr || "-"} | I${proximaLinha}: ${statusDisplay || "-"} | M${proximaLinha}: ${colMDisplay}. Botão de download liberado.`);
       } catch (err) {
         setStatus(err.message || "Erro ao atualizar a aba BASE.", true);
       }
@@ -873,7 +910,7 @@
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1500);
-        setStatus(`Download iniciado: ${arquivoOriginalNome} (abas LOJA, BASE e BASE 2 preservadas).`);
+        setStatus(`Download iniciado: ${arquivoOriginalNome} (abas LOJA, ${nomeAbaEncontrada} e BASE 2 preservadas).`);
       } catch (err) {
         setStatus(err.message || "Erro ao gerar o arquivo .xlsx para download.", true);
       }
