@@ -2,6 +2,20 @@
 
 Todas as mudanças notáveis, diagnósticos e etapas do processo deste projeto serão documentadas neste arquivo.
 
+## [1.3.4] - 2026-11-25
+
+### Processo geral e diagnóstico
+- **Detecção resiliente da aba `BASE`:** substituiu-se a comparação estrita `"BASE "` por normalização de espaços/caixa (`normalizarNomeAba`), evitando erro caso a planilha tenha `"BASE"` sem espaço à direita ou variações de espaçamento, e listando as abas disponíveis se não encontrada.
+- **Refino do OCR com quiet-zone (padding branco), binarização nítida e fallback de PSM (`6` → `7`):** melhorou-se a precisão na leitura de código do cliente, número do pedido, peso e valor nos recortes direcionados.
+
+### Alterado
+- `localizarAbaBase` passa a aceitar `"BASE"`, `"BASE "` e variações com espaços, retornando o nome exato da aba detectada.
+- `criarRecorteProcessado` adiciona margem branca (`padPx`) e binarização pura (`0` ou `255`), combinada com `reconhecerRegiao` usando `tessedit_pageseg_mode` `6` e fallback `7`.
+
+### Corrigido
+- Seletor universal `*` no CSS de `public/index.html`.
+- Falha de localização da aba quando o nome não possuía espaço final (`"BASE "` vs `"BASE"`).
+
 ## [1.3.3] - 2026-11-25
 
 ### Processo geral e diagnóstico

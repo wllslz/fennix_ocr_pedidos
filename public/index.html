@@ -187,8 +187,6 @@
     let arquivoOriginalNome = "planilha_atualizada.xlsx";
     let pedidosAdicionados = [];
     let ocrWorker = null;
-    let etapaOcrBasePct = 0;
-    let etapaOcrPesoPct = 50;
     let imagensCarregadas = [];
     let imagemSelecionadaIdx = 0;
 
@@ -379,18 +377,14 @@
       });
     }
 
-    function criarRecorteProcessado(img, rx, ry, rw, rh, scale = 2.2, padPx = 16) {
+    function criarRecorteProcessado(img, rx, ry, rw, rh, scale = 3.5, padPx = 24) {
       const sx = Math.max(0, Math.floor(img.width * rx));
       const sy = Math.max(0, Math.floor(img.height * ry));
       const sw = Math.max(1, Math.min(img.width - sx, Math.floor(img.width * rw)));
       const sh = Math.max(1, Math.min(img.height - sy, Math.floor(img.height * rh)));
 
-      const maxDim = 1800;
-      const ratio = Math.min(scale, maxDim / Math.max(sw, sh, 1));
-      const finalScale = Math.max(1, ratio);
-
-      const innerW = Math.max(1, Math.round(sw * finalScale));
-      const innerH = Math.max(1, Math.round(sh * finalScale));
+      const innerW = Math.max(1, Math.round(sw * scale));
+      const innerH = Math.max(1, Math.round(sh * scale));
 
       const canvas = document.createElement("canvas");
       canvas.width = innerW + padPx * 2;
@@ -406,13 +400,13 @@
 
       const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = imageData.data;
-      const contrast = 1.65;
+      const contrast = 1.75;
       const intercept = 128 * (1 - contrast);
 
       for (let i = 0; i < d.length; i += 4) {
         const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
         let adj = Math.min(255, Math.max(0, gray * contrast + intercept));
-        adj = adj < 165 ? 0 : 255;
+        adj = adj < 160 ? 0 : 255;
         d[i] = adj;
         d[i + 1] = adj;
         d[i + 2] = adj;
@@ -424,16 +418,23 @@
 
     async function obterWorkerTesseract() {
       if (ocrWorker) return ocrWorker;
-      ocrWorker = await Tesseract.createWorker("por", 1, {
+      ocrWorker = await Tesseract.createWorker("por+eng", 1, {
         logger: (m) => {
           if (m.status === "recognizing text") {
-            const p = Math.round((m.progress || 0) * 50);
-            const totalPct = Math.min(99, etapaOcrBasePct + p);
-            setStatus(`OCR em andamento: ${totalPct}%...`);
+            setStatus(`OCR em andamento: ${Math.round((m.progress || 0) * 100)}%...`);
           }
         }
       });
       return ocrWorker;
+    }
+
+    async function reconhecerRegiao(worker, imagemPrep, whitelist, psm) {
+      await worker.setParameters({
+        tessedit_char_whitelist: whitelist,
+        tessedit_pageseg_mode: String(psm)
+      });
+      const res = await worker.recognize(imagemPrep);
+      return (res.data?.text || "").trim();
     }
 
     function normalizarPesoExtraido(rawPeso) {
@@ -459,35 +460,42 @@
       return limpo;
     }
 
-    function extrairDadosPedido(textoCompleto, textoRodape) {
-      const combinado = `${textoCompleto}\n${textoRodape}`.replace(/\r/g, "\n");
+    function extrairDadosPedido(textoCompleto, textoTopoDir, textoClienteEsq, textoTotais) {
+      const base = `${textoTopoDir}\n${textoClienteEsq}\n${textoTotais}\n${textoCompleto}`
+        .replace(/\r/g, "\n")
+        .trim();
 
       let pedido = "";
-      const mPedido = combinado.match(/\bPedido\b[^\d\n]{0,18}(\d{5,14})\b/i);
-      if (mPedido && mPedido[1]) {
-        pedido = mPedido[1];
+      const rxPedidoRotulo = /\bPedido\b[^\d\n]{0,18}(\d{5,14})\b/i;
+      const mPedidoRotulo = base.match(rxPedidoRotulo);
+      if (mPedidoRotulo && mPedidoRotulo[1]) {
+        pedido = mPedidoRotulo[1];
       } else {
-        const longos = Array.from(combinado.matchAll(/\b(\d{7,14})\b/g)).map((m) => m[1]);
-        pedido = longos[0] || "";
-      }
-
-      let clienteCodigo = "";
-      const mClienteTraco = combinado.match(/\bCliente\b[^\d\n]{0,12}(\d{1,8})\s*-/i);
-      if (mClienteTraco && mClienteTraco[1]) {
-        clienteCodigo = mClienteTraco[1];
-      } else {
-        const mClienteGeral = combinado.match(/\bCliente\b[^\d\n]{0,12}(\d{1,8})\b/i);
-        if (mClienteGeral && mClienteGeral[1]) {
-          clienteCodigo = mClienteGeral[1];
+        const candidatosLongos = Array.from(textoTopoDir.matchAll(/\b(\d{6,14})\b/g)).map((m) => m[1]);
+        if (candidatosLongos.length > 0) {
+          pedido = candidatosLongos[0];
+        } else {
+          const candidatosGerais = Array.from(textoCompleto.matchAll(/\b(\d{6,14})\b/g)).map((m) => m[1]);
+          pedido = candidatosGerais[0] || "";
         }
       }
 
-      let pesoBruto = "";
-      const mPesoRodape = textoRodape.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
-      if (mPesoRodape && mPesoRodape[1]) {
-        pesoBruto = mPesoRodape[1];
+      let clienteCodigo = "";
+      const rxClienteCod = /\bCliente\b[^\d\n]{0,15}(\d{2,10})\b/i;
+      const mClienteCod = base.match(rxClienteCod);
+      if (mClienteCod && mClienteCod[1]) {
+        clienteCodigo = mClienteCod[1];
       } else {
-        const mPesoGeral = combinado.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
+        const candidatosCliente = Array.from(textoClienteEsq.matchAll(/\b(\d{3,8})\b/g)).map((m) => m[1]);
+        clienteCodigo = candidatosCliente[0] || "";
+      }
+
+      let pesoBruto = "";
+      const mPesoTotais = textoTotais.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
+      if (mPesoTotais && mPesoTotais[1]) {
+        pesoBruto = mPesoTotais[1];
+      } else {
+        const mPesoGeral = base.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
         if (mPesoGeral && mPesoGeral[1]) {
           pesoBruto = mPesoGeral[1];
         }
@@ -495,15 +503,13 @@
       const peso = normalizarPesoExtraido(pesoBruto);
 
       let total = "";
-      const mTotalRodape = textoRodape.match(/\bTotal\b[^\d\n]{0,20}(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})/i);
-      if (mTotalRodape && mTotalRodape[1]) {
-        total = mTotalRodape[1];
+      const mTotalLinha = textoTotais.match(/\bTotal\b[^\d\n]{0,18}(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})/i);
+      if (mTotalLinha && mTotalLinha[1]) {
+        total = mTotalLinha[1];
       } else {
-        const todosTotais = Array.from(
-          combinado.matchAll(/\bTotal\b[^\d\n]{0,20}(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})/gi)
-        ).map((m) => m[1]);
-        if (todosTotais.length > 0) {
-          total = todosTotais[todosTotais.length - 1];
+        const mTotalGeral = base.match(/\bTotal\b[^\d\n]{0,18}(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})/i);
+        if (mTotalGeral && mTotalGeral[1]) {
+          total = mTotalGeral[1];
         }
       }
 
@@ -517,26 +523,40 @@
 
     async function processarPrint(itemImg) {
       const img = await carregarImagem(itemImg.dataUrl);
-      const fullPrep = criarRecorteProcessado(img, 0, 0, 1, 1, 2.0, 12);
-      const rodapePrep = criarRecorteProcessado(img, 0.25, 0.36, 0.75, 0.26, 2.6, 20);
+      const fullPrep = criarRecorteProcessado(img, 0, 0, 1, 1, 2.5, 16);
+      const topoDirPrep = criarRecorteProcessado(img, 0.55, 0.08, 0.45, 0.25, 4.0, 28);
+      const clienteEsqPrep = criarRecorteProcessado(img, 0, 0.14, 0.65, 0.22, 4.0, 28);
+      const totaisPrep = criarRecorteProcessado(img, 0.4, 0.36, 0.6, 0.16, 4.5, 28);
 
       const worker = await obterWorkerTesseract();
 
-      etapaOcrBasePct = 0;
-      await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "6" });
-      const fullRes = await worker.recognize(fullPrep);
+      const fullTxt = await reconhecerRegiao(worker, fullPrep, "", 6);
+      let topoDirTxt = await reconhecerRegiao(worker, topoDirPrep, "0123456789Pedido: ", 6);
+      if (!/\d{5,14}/.test(topoDirTxt)) {
+        topoDirTxt = await reconhecerRegiao(worker, topoDirPrep, "0123456789Pedido: ", 7);
+      }
 
-      etapaOcrBasePct = 50;
-      await worker.setParameters({ tessedit_char_whitelist: "0123456789.,TotalPesoKg: ", tessedit_pageseg_mode: "6" });
-      const rodapeRes = await worker.recognize(rodapePrep);
+      let clienteEsqTxt = await reconhecerRegiao(worker, clienteEsqPrep, "0123456789Cliente- ", 6);
+      if (!/\d{2,10}/.test(clienteEsqTxt)) {
+        clienteEsqTxt = await reconhecerRegiao(worker, clienteEsqPrep, "0123456789Cliente- ", 7);
+      }
 
-      etapaOcrBasePct = 0;
-      const extraido = extrairDadosPedido(fullRes.data?.text || "", rodapeRes.data?.text || "");
+      let totaisTxt = await reconhecerRegiao(worker, totaisPrep, "0123456789.,TotalPesoKg: ", 6);
+      if (!/\d/.test(totaisTxt)) {
+        totaisTxt = await reconhecerRegiao(worker, totaisPrep, "0123456789.,TotalPesoKg: ", 7);
+      }
 
-      if (!extraido.pedido && !extraido.total) {
+      await worker.setParameters({
+        tessedit_char_whitelist: "",
+        tessedit_pageseg_mode: "3"
+      });
+
+      const extraido = extrairDadosPedido(fullTxt, topoDirTxt, clienteEsqTxt, totaisTxt);
+
+      if (!extraido.pedido) {
         return {
           ...extraido,
-          aviso: `OCR não isolou os dados em "${itemImg.file.name}". Confira ou digite manualmente.`
+          aviso: `OCR não isolou o número do pedido em "${itemImg.file.name}". Confira ou digite manualmente.`
         };
       }
 
@@ -608,7 +628,6 @@
         document.getElementById("pesoInput").value = "";
         document.getElementById("totalInput").value = "";
 
-        setStatus("OCR em andamento: 0%...");
         const resultado = await processarPrint(imagens[0]);
         if (resultado.cliente) document.getElementById("clienteInput").value = resultado.cliente;
         if (resultado.pedido) document.getElementById("pedidoInput").value = resultado.pedido;
@@ -891,7 +910,7 @@
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1500);
-        setStatus(`Download iniciado: ${arquivoOriginalNome} (abas LOJA, ${nomeAbaEncontrada} e BASE 2 preservadas).`);
+        setStatus(`Download iniciado: ${arquivoOriginalNome} (abas preservadas).`);
       } catch (err) {
         setStatus(err.message || "Erro ao gerar o arquivo .xlsx para download.", true);
       }
