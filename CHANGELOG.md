@@ -94,3 +94,7 @@ Todas as mudanças notáveis, diagnósticos e etapas do processo deste projeto s
 ### Corrigido
 - Falha de deploy na Vercel por detecção de projeto Django sem entrypoint Python.
 - Captura incorreta de `"NIX"` como número do pedido e ausência do código numérico do cliente.
+
+## [1.4.0] - 2026-11-25
+- Concluído `public/index.html` com fechamento completo de `adicionarNaPlanilha()`, geração/download do `.xlsx` preservando estilos e `sharedStrings` nas colunas `A..M`, e inserção na próxima linha ativa após conteúdo real da aba `BASE`.
+- Mantido suporte a upload, arrastar e soltar, `Ctrl + V`, pré-processamento em Canvas e OCR via Tesseract.js para Código do Cliente, Nº Pedido, Peso (kg) e Valor (R$).
