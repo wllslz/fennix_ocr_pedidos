@@ -1,20 +1,39 @@
 # Changelog
 
-Todas as mudanças notáveis deste projeto serão documentadas neste arquivo.
+Todas as mudanças notáveis, diagnósticos e etapas do processo deste projeto serão documentadas neste arquivo.
+
+## [1.2.0] - 2026-11-25
+
+### Processo geral e diagnóstico
+- **Inspeção da planilha gerada (`MANITORAMENTO EXPEDIÇÃO - 26-01-26 (version 1).xlsb_atualizado.xlsx`) e do print da aba `BASE `:** identificou-se que a aba `BASE ` contém linhas formatadas vazias até a linha `1.048.504`, fazendo com que a soma simples `+ 1` sobre a última tag `<row>` enviasse os lançamentos para a linha `1048505` em vez da próxima linha ativa logo abaixo do último pedido preenchido (ex.: linha `2583` após a linha `2582`).
+- **Mapeamento das colunas da aba `BASE ` (`A` a `L`):** confirmou-se que a aba `BASE ` utiliza estrutura específica (`A`: Data serial/estilo `56`, `B`: Mês via `sharedStrings`/`57`, `C`: Cliente/`57`, `D`: Peso/`58`, `E`: Valor/`59`, `F`: Pedido/`60`, `G`–`L`: colunas operacionais com `SEPARADO` e estilos preservados), distinta da aba `LOJA` e da aba oculta `BASE 2`.
+- **Verificação do fluxo de download:** assegurou-se que o botão **Baixar .xlsx atualizado** permaneça bloqueado até que o arquivo `.xlsx` seja carregado e ao menos um pedido seja adicionado na sessão, mantendo todas as abas (`LOJA`, `BASE `, `BASE 2`) intactas no arquivo final.
+
+### Alterado
+- Inserção na aba `BASE ` direcionada à próxima linha após a última linha com conteúdo real (`encontrarProximaLinhaAtiva`), evitando o salto até `1048505`.
+- Preenchimento das células nas colunas `A` a `L` herdando os estilos e referências de `sharedStrings` (como mês e `SEPARADO`) da linha modelo da aba `BASE `.
+- Exibição da coluna **Linha BASE** na tabela de pedidos adicionados na sessão e mensagens de status detalhadas na adição e no download.
+
+### Corrigido
+- Lançamento de pedidos fora da sequência ativa da aba `BASE ` (linha `1048505` em vez da linha imediatamente abaixo dos últimos registros).
+- Despadronização de colunas e tipos numéricos/strings ao gravar novos registros na aba `BASE `.
 
 ## [1.1.0] - 2026-11-25
 
+### Processo geral e diagnóstico
+- **Diagnóstico da leitura OCR no print do pedido:** verificou-se que o OCR de imagem inteira capturava `"NIX"` (do cabeçalho/logo `FENNIX`) no campo de pedido e não isolava o código numérico do cliente (`14660`) nem o número completo do pedido (`4731000665`).
+- **Diagnóstico de build na Vercel:** identificou-se o erro `[DJANGO_ENTRYPOINT_NOT_FOUND]` quando a Vercel tentava aplicar preset Django após a migração para aplicação estática client-side em `public/index.html`.
+
 ### Adicionado
 - Pré-processamento de imagem no navegador via HTML5 Canvas (`upscale`, escala de cinza, ajuste de contraste e binarização leve) integrado ao Tesseract.js (`por+eng`).
-- Recortes direcionados por regiões do layout do pedido (`topoDir`, `clienteEsq`, `totais` e imagem completa) com `tessedit_char_whitelist` para aumentar a precisão na leitura de campos numéricos.
-- Exibição detalhada do resumo extraído (`Cód. Cliente`, `Pedido`, `Peso`, `Total`) e do texto bruto reconhecido pelo OCR na caixa de status.
+- Recortes direcionados (`topoDir`, `clienteEsq`, `totais` e imagem completa) com `tessedit_char_whitelist` para leitura de campos numéricos e identificadores.
+- Exibição do resumo extraído (`Cód. Cliente`, `Pedido`, `Peso`, `Valor`) e do texto bruto do OCR na caixa de status.
 
 ### Alterado
-- Extração de **Código do Cliente** (ex.: `14660`) em substituição ao nome do cliente.
-- Extração do **Nº Pedido** focada em sequências numéricas após o rótulo `Pedido` / topo direito (ex.: `4731000665`), evitando capturas incorretas como trechos do cabeçalho/logo (`FENNIX`).
-- Controle do botão **Baixar .xlsx atualizado**, que permanece desabilitado até que a planilha base (`.xlsx` com a aba `BASE `) seja carregada e ao menos um pedido seja adicionado na sessão.
-- Configuração estática em `vercel.json` com `"framework": null`, `"buildCommand": null` e `"outputDirectory": "public"` para evitar detecção indevida do preset Django no deploy client-side.
+- Extração de **Código do Cliente** (ex.: `14660`) e **Nº Pedido** numérico (ex.: `4731000665`) a partir dos rótulos e regiões do documento.
+- Bloqueio do botão **Baixar .xlsx atualizado** até o carregamento da planilha base e a adição de pelo menos um pedido.
+- Configuração de `vercel.json` com `"framework": null`, `"buildCommand": null` e `"outputDirectory": "public"`.
 
 ### Corrigido
-- Falhas de build na Vercel (`[DJANGO_ENTRYPOINT_NOT_FOUND]`) causadas pela detecção residual de projeto Django.
-- Leitura trocada do número do pedido e ausência do código numérico do cliente em prints de pedidos da Fennix.
+- Falha de deploy na Vercel por detecção de projeto Django sem entrypoint Python.
+- Captura incorreta de `"NIX"` como número do pedido e ausência do código numérico do cliente.
