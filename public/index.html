@@ -351,8 +351,8 @@
     applyModalBtn.addEventListener("click", () => {
       document.getElementById("clienteInput").value = modalCliente.value.trim();
       document.getElementById("pedidoInput").value = modalPedido.value.trim();
-      document.getElementById("pesoInput").value = normalizarPesoExtraido(modalPeso.value.trim());
-      document.getElementById("totalInput").value = modalTotal.value.trim();
+      document.getElementById("pesoInput").value = normalizarDecimalBr(modalPeso.value.trim());
+      document.getElementById("totalInput").value = normalizarDecimalBr(modalTotal.value.trim());
       fecharModalImagem();
     });
 
@@ -379,47 +379,116 @@
       });
     }
 
-    function criarRecorteProcessado(img, rx, ry, rw, rh, scale = 3.0, padPx = 20) {
-      const sx = Math.max(0, Math.floor(img.width * rx));
-      const sy = Math.max(0, Math.floor(img.height * ry));
-      const sw = Math.max(1, Math.min(img.width - sx, Math.floor(img.width * rw)));
-      const sh = Math.max(1, Math.min(img.height - sy, Math.floor(img.height * rh)));
+    /**
+     * Pré-processamento independente de resolução/qualidade:
+     * 1. Normaliza a largura alvo (DPI virtual consistente para fontes pequenas/baixa resolução)
+     * 2. Auto-Levels por percentil (p5..p85 -> 0..255) para fundo branco limpo e traços preservados
+     * 3. Unsharp Mask suave para recuperar bordas de vírgulas e dígitos comprimidos em JPEG
+     */
+    function criarRecorteAdaptativo(img, rx, ry, rw, rh, targetWidth = 2800, padPx = 28, sharpenAmount = 0.5) {
+      const clamp01 = (v) => Math.max(0, Math.min(1, v));
+      const x0 = clamp01(rx);
+      const y0 = clamp01(ry);
+      const x1 = clamp01(rx + rw);
+      const y1 = clamp01(ry + rh);
 
-      const maxDim = 2200;
-      const ratio = Math.min(scale, maxDim / Math.max(sw, sh, 1));
-      const finalScale = Math.max(1, ratio);
+      const sx = Math.floor(img.width * x0);
+      const sy = Math.floor(img.height * y0);
+      const sw = Math.max(1, Math.floor(img.width * (x1 - x0)));
+      const sh = Math.max(1, Math.floor(img.height * (y1 - y0)));
+
+      const desiredScale = targetWidth / Math.max(sw, 1);
+      const scale = Math.max(1.2, Math.min(4.8, desiredScale));
+      const maxDim = 3200;
+      const finalScale = Math.min(scale, maxDim / Math.max(sw, sh, 1));
 
       const innerW = Math.max(1, Math.round(sw * finalScale));
       const innerH = Math.max(1, Math.round(sh * finalScale));
+      const w = innerW + padPx * 2;
+      const h = innerH + padPx * 2;
 
       const canvas = document.createElement("canvas");
-      canvas.width = innerW + padPx * 2;
-      canvas.height = innerH + padPx * 2;
+      canvas.width = w;
+      canvas.height = h;
       const ctx = canvas.getContext("2d");
 
       ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, w, h);
 
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
       ctx.drawImage(img, sx, sy, sw, sh, padPx, padPx, innerW, innerH);
 
-      // Contraste suave em tons de cinza (preserva dígitos finos sem apagar traços)
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, w, h);
       const d = imageData.data;
-      const contrast = 1.45;
-      const intercept = 128 * (1 - contrast);
+      const totalPixels = w * h;
+      const gray = new Float32Array(totalPixels);
+      const hist = new Uint32Array(256);
 
-      for (let i = 0; i < d.length; i += 4) {
-        const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        const adj = Math.min(255, Math.max(0, gray * contrast + intercept));
-        d[i] = adj;
-        d[i + 1] = adj;
-        d[i + 2] = adj;
+      for (let p = 0, i = 0; p < totalPixels; p++, i += 4) {
+        const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        gray[p] = g;
+        hist[Math.min(255, Math.max(0, g | 0))]++;
+      }
+
+      // Auto-levels por histograma: p2 (tinta escura) e p82 (fundo claro)
+      let acc = 0;
+      let blackPoint = 30;
+      let whitePoint = 235;
+      const lowTarget = totalPixels * 0.015;
+      const highTarget = totalPixels * 0.80;
+
+      for (let v = 0; v < 256; v++) {
+        acc += hist[v];
+        if (acc >= lowTarget) {
+          blackPoint = Math.min(110, v);
+          break;
+        }
+      }
+      acc = 0;
+      for (let v = 0; v < 256; v++) {
+        acc += hist[v];
+        if (acc >= highTarget) {
+          whitePoint = Math.max(blackPoint + 40, Math.min(250, v));
+          break;
+        }
+      }
+
+      const range = Math.max(1, whitePoint - blackPoint);
+      const leveled = new Float32Array(totalPixels);
+      for (let p = 0; p < totalPixels; p++) {
+        const norm = ((gray[p] - blackPoint) / range) * 255;
+        leveled[p] = norm < 0 ? 0 : norm > 255 ? 255 : norm;
+      }
+
+      // Nitidez 3x3 (Unsharp Mask) para restaurar traços finos e vírgulas
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = y * w + x;
+          let val = leveled[idx];
+          if (sharpenAmount > 0 && x > 0 && x < w - 1 && y > 0 && y < h - 1) {
+            const center = leveled[idx];
+            const neighbors =
+              leveled[idx - 1] +
+              leveled[idx + 1] +
+              leveled[idx - w] +
+              leveled[idx + w];
+            val = center * (1 + 4 * sharpenAmount) - neighbors * sharpenAmount;
+          }
+          const out = val < 0 ? 0 : val > 255 ? 255 : val;
+          const o = idx * 4;
+          d[o] = out;
+          d[o + 1] = out;
+          d[o + 2] = out;
+        }
       }
 
       ctx.putImageData(imageData, 0, 0);
-      return canvas.toDataURL("image/png");
+      return {
+        dataUrl: canvas.toDataURL("image/png"),
+        width: w,
+        height: h
+      };
     }
 
     async function obterWorkerTesseract() {
@@ -436,44 +505,218 @@
       return ocrWorker;
     }
 
-    function normalizarPesoExtraido(rawPeso) {
-      if (!rawPeso) return "";
-      let limpo = String(rawPeso).trim().replace(/\s+/g, "");
-      if (!limpo) return "";
+    function normalizarDecimalBr(raw) {
+      if (!raw) return "";
+      let s = String(raw).trim().replace(/^[^\d]+|[^\d]+$/g, "");
+      if (!s) return "";
 
-      if (/[.,]/.test(limpo)) {
-        const partes = limpo.split(/[.,]/);
-        if (partes.length === 2) {
+      // Caso OCR leia "212 16" ou "8 40" (espaço no lugar da vírgula em baixa resolução)
+      const mEspaco = s.match(/^(\d{1,3}(?:[.,]\d{3})*|\d+)\s+(\d{2})$/);
+      if (mEspaco) {
+        return `${mEspaco[1]},${mEspaco[2]}`;
+      }
+
+      s = s.replace(/\s+/g, "");
+      if (s.includes(",") && s.includes(".")) {
+        // Ex: 1.359,89 -> mantém formato BR
+        const lastComma = s.lastIndexOf(",");
+        const lastDot = s.lastIndexOf(".");
+        if (lastComma > lastDot) {
+          return s;
+        }
+        // Ex: 1,359.89 -> converte para 1.359,89
+        const partes = s.split(".");
+        const dec = partes.pop();
+        return `${partes.join("").replace(/,/g, ".")},${dec}`;
+      }
+
+      if (s.includes(".")) {
+        const partes = s.split(".");
+        if (partes.length === 2 && partes[1].length <= 3) {
           return `${partes[0]},${partes[1]}`;
         }
-        const dec = partes.pop();
-        return `${partes.join("")},${dec}`;
       }
 
-      if (/^\d{4,5}$/.test(limpo)) {
-        const inteiro = limpo.slice(0, -2);
-        const decimal = limpo.slice(-2);
-        return `${inteiro},${decimal}`;
+      if (!/[.,]/.test(s) && /^\d{4,5}$/.test(s)) {
+        return `${s.slice(0, -2)},${s.slice(-2)}`;
       }
 
-      return limpo;
+      return s;
     }
 
-    function extrairDadosPedido(textoCompleto, textoTopoDir, textoRodape) {
-      const combinado = `${textoTopoDir}\n${textoCompleto}\n${textoRodape}`.replace(/\r/g, "\n");
+    /**
+     * Localiza dinamicamente no resultado do Pass 1 as bandas verticais (0..1)
+     * do cabeçalho de Pedido e da linha de resumo (Emitente / N.Itens / Peso / Total),
+     * independente de quantos itens o pedido tenha.
+     */
+    function detectarBandasDinamicas(ocrData, imgWidth, imgHeight) {
+      const words = Array.isArray(ocrData?.words) ? ocrData.words : [];
+      let pedidoY = null;
+      let resumoYs = [];
 
-      // 1. Pedido: rótulo flexível (Pedido/Ped1do) ou sequência longa de 8 a 14 dígitos no topo direito
+      for (const w of words) {
+        const txt = String(w.text || "").trim().toLowerCase();
+        const bbox = w.bbox;
+        if (!txt || !bbox) continue;
+
+        const yMid = ((bbox.y0 + bbox.y1) / 2) / Math.max(1, imgHeight);
+        const xMid = ((bbox.x0 + bbox.x1) / 2) / Math.max(1, imgWidth);
+
+        if (yMid < 0.45 && xMid > 0.35 && /^ped[a-z0-9]{2,4}/.test(txt)) {
+          pedidoY = yMid;
+        }
+
+        if (
+          /^emitente/.test(txt) ||
+          /itens/.test(txt) ||
+          /^peso:?$/.test(txt) ||
+          /^k[gq]$/.test(txt)
+        ) {
+          resumoYs.push(yMid);
+        } else if (/^total:?$/.test(txt) && yMid > 0.24) {
+          // Ignora o "Total" do cabeçalho da tabela (que fica logo abaixo de Descrição/Quant)
+          resumoYs.push(yMid);
+        }
+      }
+
+      let resumoY = null;
+      if (resumoYs.length > 0) {
+        resumoYs.sort((a, b) => a - b);
+        // Pega o maior Y encontrado (o resumo sempre fica abaixo do cabeçalho da tabela)
+        resumoY = resumoYs[resumoYs.length - 1];
+      }
+
+      return { pedidoY, resumoY };
+    }
+
+    /**
+     * Pareamento geométrico por coordenadas (bbox) nas palavras reconhecidas:
+     * encontra valores à direita do rótulo na mesma linha horizontal,
+     * mesmo quando há grandes espaços em branco entre o rótulo e o número.
+     */
+    function extrairPorGeometria(ocrData, imgWidth, imgHeight) {
+      const words = Array.isArray(ocrData?.words) ? ocrData.words : [];
+      if (words.length === 0) return {};
+
+      const normWords = words
+        .filter((w) => w && w.bbox && String(w.text || "").trim())
+        .map((w) => {
+          const text = String(w.text).trim();
+          const { x0, y0, x1, y1 } = w.bbox;
+          return {
+            text,
+            lower: text.toLowerCase(),
+            x0,
+            y0,
+            x1,
+            y1,
+            yMid: (y0 + y1) / 2,
+            h: Math.max(8, y1 - y0),
+            xNorm: ((x0 + x1) / 2) / Math.max(1, imgWidth),
+            yNorm: ((y0 + y1) / 2) / Math.max(1, imgHeight)
+          };
+        });
+
+      const mesmaLinha = (anchor, cand, tolMult = 0.95) => {
+        const tol = Math.max(anchor.h, cand.h) * tolMult;
+        return Math.abs(cand.yMid - anchor.yMid) <= tol && cand.x0 >= anchor.x0 - 4;
+      };
+
       let pedido = "";
-      const mPedidoTopo = textoTopoDir.match(/Ped[a-z0-9]{2,4}[^\d\n]{0,18}(\d{6,14})\b/i);
-      if (mPedidoTopo && mPedidoTopo[1]) {
+      let cliente = "";
+      let peso = "";
+      let total = "";
+      let nItens = null;
+
+      // 1. Pedido
+      const pedidoAnchor = normWords.find((w) => w.yNorm < 0.45 && /^ped[a-z0-9]{2,4}:?$/.test(w.lower));
+      if (pedidoAnchor) {
+        const direita = normWords
+          .filter((w) => w !== pedidoAnchor && mesmaLinha(pedidoAnchor, w, 1.1))
+          .sort((a, b) => a.x0 - b.x0);
+        for (const cand of direita) {
+          const digits = cand.text.replace(/\D/g, "");
+          if (digits.length >= 6 && digits.length <= 14 && !cand.text.includes("/")) {
+            pedido = digits;
+            break;
+          }
+        }
+      }
+
+      // 2. Cliente
+      const clienteAnchor = normWords.find((w) => w.yNorm < 0.55 && /^clien[a-z0-9]{1,3}:?$/.test(w.lower));
+      if (clienteAnchor) {
+        const direita = normWords
+          .filter((w) => w !== clienteAnchor && mesmaLinha(clienteAnchor, w, 1.0))
+          .sort((a, b) => a.x0 - b.x0);
+        const linhaTexto = direita.map((d) => d.text).join(" ");
+        const mTraco = linhaTexto.match(/^(\d{1,8})\s*-/);
+        if (mTraco) {
+          cliente = mTraco[1];
+        } else if (direita[0] && /^\d{1,8}$/.test(direita[0].text)) {
+          cliente = direita[0].text;
+        }
+      }
+
+      // 3. N.Itens
+      const itensAnchor = normWords.find((w) => /itens:?$/.test(w.lower));
+      if (itensAnchor) {
+        const direita = normWords
+          .filter((w) => w !== itensAnchor && mesmaLinha(itensAnchor, w, 1.0))
+          .sort((a, b) => a.x0 - b.x0);
+        if (direita[0] && /^\d{1,4}$/.test(direita[0].text)) {
+          nItens = Number(direita[0].text);
+        }
+      }
+
+      // 4. Peso
+      const pesoAnchor = normWords.find((w) => /^peso:?$/.test(w.lower));
+      if (pesoAnchor) {
+        const direita = normWords
+          .filter((w) => w !== pesoAnchor && mesmaLinha(pesoAnchor, w, 1.0))
+          .sort((a, b) => a.x0 - b.x0);
+        const trecho = direita.slice(0, 3).map((d) => d.text).join(" ");
+        const mPeso = trecho.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,3}|\d+\s+\d{2}|\d+)/);
+        if (mPeso) {
+          peso = normalizarDecimalBr(mPeso[1]);
+        }
+      }
+
+      // 5. Total (pega o Total mais abaixo na imagem, que é o Total do pedido no rodapé)
+      const totalAnchors = normWords
+        .filter((w) => /^total:?$/.test(w.lower))
+        .sort((a, b) => b.yMid - a.yMid);
+
+      for (const tAnchor of totalAnchors) {
+        const direita = normWords
+          .filter((w) => w !== tAnchor && mesmaLinha(tAnchor, w, 1.05))
+          .sort((a, b) => a.x0 - b.x0);
+        const trecho = direita.slice(0, 3).map((d) => d.text).join(" ");
+        const mVal = trecho.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+\s+\d{2})/);
+        if (mVal) {
+          total = normalizarDecimalBr(mVal[1]);
+          break;
+        }
+      }
+
+      return { cliente, pedido, peso, total, nItens };
+    }
+
+    function extrairPorTexto(textoCompleto, textoTopoDir, textoResumo) {
+      const combinado = `${textoTopoDir}\n${textoResumo}\n${textoCompleto}`.replace(/\r/g, "\n");
+
+      // 1. Pedido
+      let pedido = "";
+      const mPedidoTopo = textoTopoDir.match(/Ped[a-z0-9]{2,4}[^\d]{0,20}(\d{6,14})\b/i);
+      if (mPedidoTopo?.[1]) {
         pedido = mPedidoTopo[1];
       } else {
         const longosTopo = Array.from(textoTopoDir.matchAll(/\b(\d{8,14})\b/g)).map((m) => m[1]);
         if (longosTopo.length > 0) {
           pedido = longosTopo[0];
         } else {
-          const mPedidoGeral = combinado.match(/Ped[a-z0-9]{2,4}[^\d\n]{0,18}(\d{6,14})\b/i);
-          if (mPedidoGeral && mPedidoGeral[1]) {
+          const mPedidoGeral = combinado.match(/Ped[a-z0-9]{2,4}[^\d]{0,20}(\d{6,14})\b/i);
+          if (mPedidoGeral?.[1]) {
             pedido = mPedidoGeral[1];
           } else {
             const longosGeral = Array.from(combinado.matchAll(/\b(\d{8,14})\b/g)).map((m) => m[1]);
@@ -482,91 +725,142 @@
         }
       }
 
-      // 2. Código do Cliente: antes do hífen após "Cliente"
-      let clienteCodigo = "";
-      const mClienteTraco = combinado.match(/Clien[a-z0-9]{1,3}[^\d\n]{0,12}(\d{1,8})\s*-/i);
-      if (mClienteTraco && mClienteTraco[1]) {
-        clienteCodigo = mClienteTraco[1];
+      // 2. Cliente
+      let cliente = "";
+      const mClienteTraco = combinado.match(/Clien[a-z0-9]{1,3}[^\d\n]{0,14}(\d{1,8})\s*-/i);
+      if (mClienteTraco?.[1]) {
+        cliente = mClienteTraco[1];
       } else {
-        const mClienteGeral = combinado.match(/Clien[a-z0-9]{1,3}[^\d\n]{0,12}(\d{1,8})\b/i);
-        if (mClienteGeral && mClienteGeral[1]) {
-          clienteCodigo = mClienteGeral[1];
+        const mClienteAssinatura = combinado.match(/\n\s*(\d{1,8})\s*-\s*[A-ZÀ-Ü]{3,}/);
+        if (mClienteAssinatura?.[1]) {
+          cliente = mClienteAssinatura[1];
+        } else {
+          const mClienteGeral = combinado.match(/Clien[a-z0-9]{1,3}[^\d\n]{0,14}(\d{1,8})\b/i);
+          if (mClienteGeral?.[1]) cliente = mClienteGeral[1];
         }
       }
 
       // 3. Peso
-      let pesoBruto = "";
-      const mPesoRodape = textoRodape.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
-      if (mPesoRodape && mPesoRodape[1]) {
-        pesoBruto = mPesoRodape[1];
+      let peso = "";
+      const fontePeso = `${textoResumo}\n${combinado}`;
+      const mPeso = fontePeso.match(/\bPeso\b[^\d\n]{0,16}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,3}|\d+\s+\d{2}|\d+)/i);
+      if (mPeso?.[1]) {
+        peso = normalizarDecimalBr(mPeso[1]);
+      }
+
+      // 4. Total: permite espaços e até 1 quebra de linha entre "Total" e o valor monetário
+      let total = "";
+      const regexValor = /(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+\s+\d{2})/g;
+
+      const mTotalResumo = textoResumo.match(/\bTotal\b[\s:R$]{0,35}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+\s+\d{2})/i);
+      if (mTotalResumo?.[1]) {
+        total = normalizarDecimalBr(mTotalResumo[1]);
       } else {
-        const mPesoGeral = combinado.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
-        if (mPesoGeral && mPesoGeral[1]) {
-          pesoBruto = mPesoGeral[1];
+        // Caso o recorte do resumo tenha pego apenas o número no final da linha (ex: "Emitente ... 8,40 Kg 212,16")
+        const valoresResumo = Array.from(textoResumo.matchAll(regexValor)).map((m) => normalizarDecimalBr(m[1]));
+        if (valoresResumo.length >= 2) {
+          total = valoresResumo[valoresResumo.length - 1];
+        } else if (valoresResumo.length === 1 && peso && valoresResumo[0] !== peso) {
+          total = valoresResumo[0];
         }
       }
-      const peso = normalizarPesoExtraido(pesoBruto);
 
-      // 4. Total
-      let total = "";
-      const mTotalRodape = textoRodape.match(/\bTotal\b[^\d\n]{0,20}(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})/i);
-      if (mTotalRodape && mTotalRodape[1]) {
-        total = mTotalRodape[1];
-      } else {
+      if (!total) {
         const todosTotais = Array.from(
-          combinado.matchAll(/\bTotal\b[^\d\n]{0,20}(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})/gi)
-        ).map((m) => m[1]);
+          combinado.matchAll(/\bTotal\b[\s:R$]{0,35}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+\s+\d{2})/gi)
+        ).map((m) => normalizarDecimalBr(m[1]));
         if (todosTotais.length > 0) {
           total = todosTotais[todosTotais.length - 1];
         }
       }
 
-      return {
-        cliente: clienteCodigo,
-        pedido,
-        peso,
-        total
-      };
+      // Fallback final para pedido de 1 item: pega o último valor monetário da linha do produto se N.Itens == 1
+      if (!total) {
+        const mItens = combinado.match(/Itens[^\d]{0,10}(\d+)/i);
+        if (mItens && Number(mItens[1]) === 1) {
+          const valsLinhaProduto = Array.from(textoCompleto.matchAll(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\b/g)).map((m) =>
+            normalizarDecimalBr(m[1])
+          );
+          if (valsLinhaProduto.length > 0) {
+            total = valsLinhaProduto[valsLinhaProduto.length - 1];
+          }
+        }
+      }
+
+      return { cliente, pedido, peso, total };
     }
 
     async function processarPrint(itemImg) {
       const img = await carregarImagem(itemImg.dataUrl);
-      const fullPrep = criarRecorteProcessado(img, 0, 0, 1, 1, 2.2, 16);
-      const topoDirPrep = criarRecorteProcessado(img, 0.45, 0.03, 0.55, 0.28, 3.8, 24);
-      const rodapePrep = criarRecorteProcessado(img, 0.25, 0.34, 0.75, 0.28, 3.0, 20);
-
       const worker = await obterWorkerTesseract();
 
+      // Passada 1: Imagem inteira normalizada (~2800px) para extração global + mapeamento de coordenadas
       etapaOcrBasePct = 0;
-      etapaOcrFaixaPct = 34;
+      etapaOcrFaixaPct = 40;
+      const fullPrep = criarRecorteAdaptativo(img, 0, 0, 1, 1, 2800, 24, 0.45);
       await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "3" });
-      const fullRes = await worker.recognize(fullPrep);
+      const fullRes = await worker.recognize(fullPrep.dataUrl);
 
-      etapaOcrBasePct = 34;
-      etapaOcrFaixaPct = 33;
-      await worker.setParameters({ tessedit_char_whitelist: "0123456789PedidoData:/ ", tessedit_pageseg_mode: "6" });
-      const topoDirRes = await worker.recognize(topoDirPrep);
+      const geoFull = extrairPorGeometria(fullRes.data, fullPrep.width, fullPrep.height);
+      const bandas = detectarBandasDinamicas(fullRes.data, fullPrep.width, fullPrep.height);
 
-      etapaOcrBasePct = 67;
-      etapaOcrFaixaPct = 33;
-      await worker.setParameters({ tessedit_char_whitelist: "0123456789.,TotalPesoKg: ", tessedit_pageseg_mode: "6" });
-      const rodapeRes = await worker.recognize(rodapePrep);
+      // Passada 2: Recorte focado na faixa do Pedido (topo direito, coordenada dinâmica)
+      etapaOcrBasePct = 40;
+      etapaOcrFaixaPct = 30;
+      const pedRy = bandas.pedidoY !== null ? Math.max(0, bandas.pedidoY - 0.06) : 0.02;
+      const pedRh = bandas.pedidoY !== null ? 0.14 : 0.34;
+      const topoDirPrep = criarRecorteAdaptativo(img, 0.40, pedRy, 0.60, pedRh, 2400, 28, 0.55);
+      await worker.setParameters({
+        tessedit_char_whitelist: "0123456789PedidoCarregData:/ ",
+        tessedit_pageseg_mode: "6"
+      });
+      const topoDirRes = await worker.recognize(topoDirPrep.dataUrl);
+      const geoTopo = extrairPorGeometria(topoDirRes.data, topoDirPrep.width, topoDirPrep.height);
 
+      // Passada 3: Recorte focado na linha dinâmica de resumo (Emitente / N.Itens / Peso / Total)
+      etapaOcrBasePct = 70;
+      etapaOcrFaixaPct = 30;
+      const resRy = bandas.resumoY !== null ? Math.max(0.18, bandas.resumoY - 0.045) : 0.28;
+      const resRh = bandas.resumoY !== null ? 0.095 : 0.48;
+      const resumoPrep = criarRecorteAdaptativo(img, 0.0, resRy, 1.0, resRh, 2800, 28, 0.55);
+      await worker.setParameters({
+        tessedit_char_whitelist: "0123456789.,TotalPesoItensEmitenteKgR$: ",
+        tessedit_pageseg_mode: "6"
+      });
+      const resumoRes = await worker.recognize(resumoPrep.dataUrl);
+      const geoResumo = extrairPorGeometria(resumoRes.data, resumoPrep.width, resumoPrep.height);
+
+      // Restaura parâmetros padrão do worker
+      await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "3" });
       etapaOcrBasePct = 0;
-      const extraido = extrairDadosPedido(
+
+      const txtMerged = extrairPorTexto(
         fullRes.data?.text || "",
         topoDirRes.data?.text || "",
-        rodapeRes.data?.text || ""
+        resumoRes.data?.text || ""
       );
 
-      if (!extraido.pedido) {
+      const resultado = {
+        cliente: geoFull.cliente || txtMerged.cliente || "",
+        pedido: geoTopo.pedido || geoFull.pedido || txtMerged.pedido || "",
+        peso: geoResumo.peso || geoFull.peso || txtMerged.peso || "",
+        total: geoResumo.total || geoFull.total || txtMerged.total || ""
+      };
+
+      const faltantes = [];
+      if (!resultado.cliente) faltantes.push("Cliente");
+      if (!resultado.pedido) faltantes.push("Pedido");
+      if (!resultado.peso) faltantes.push("Peso");
+      if (!resultado.total) faltantes.push("Valor R$");
+
+      if (faltantes.length > 0) {
         return {
-          ...extraido,
-          aviso: `OCR não isolou o número do pedido em "${itemImg.file.name}". Confira ou digite manualmente.`
+          ...resultado,
+          aviso: `OCR não isolou [${faltantes.join(", ")}] em "${itemImg.file.name}". Confira na imagem ampliada ou preencha manualmente.`
         };
       }
 
-      return { ...extraido, aviso: "" };
+      return { ...resultado, aviso: "" };
     }
 
     function renderUltimaLinha(item) {
@@ -804,8 +1098,8 @@
 
       const clienteStr = document.getElementById("clienteInput").value.trim();
       const pedidoStr = document.getElementById("pedidoInput").value.trim();
-      const pesoStr = normalizarPesoExtraido(document.getElementById("pesoInput").value.trim());
-      const totalStr = document.getElementById("totalInput").value.trim();
+      const pesoStr = normalizarDecimalBr(document.getElementById("pesoInput").value.trim());
+      const totalStr = normalizarDecimalBr(document.getElementById("totalInput").value.trim());
 
       if (!clienteStr && !pedidoStr && !pesoStr && !totalStr) {
         setStatus("Preencha ao menos um campo antes de adicionar à aba BASE.", true);
