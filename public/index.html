@@ -379,12 +379,6 @@
       });
     }
 
-    /**
-     * Pré-processamento independente de resolução/qualidade:
-     * 1. Normaliza a largura alvo (DPI virtual consistente para fontes pequenas/baixa resolução)
-     * 2. Auto-Levels por percentil (p5..p85 -> 0..255) para fundo branco limpo e traços preservados
-     * 3. Unsharp Mask suave para recuperar bordas de vírgulas e dígitos comprimidos em JPEG
-     */
     function criarRecorteAdaptativo(img, rx, ry, rw, rh, targetWidth = 2800, padPx = 28, sharpenAmount = 0.5) {
       const clamp01 = (v) => Math.max(0, Math.min(1, v));
       const x0 = clamp01(rx);
@@ -398,7 +392,7 @@
       const sh = Math.max(1, Math.floor(img.height * (y1 - y0)));
 
       const desiredScale = targetWidth / Math.max(sw, 1);
-      const scale = Math.max(1.2, Math.min(4.8, desiredScale));
+      const scale = Math.max(1.2, Math.min(5.0, desiredScale));
       const maxDim = 3200;
       const finalScale = Math.min(scale, maxDim / Math.max(sw, sh, 1));
 
@@ -431,7 +425,6 @@
         hist[Math.min(255, Math.max(0, g | 0))]++;
       }
 
-      // Auto-levels por histograma: p2 (tinta escura) e p82 (fundo claro)
       let acc = 0;
       let blackPoint = 30;
       let whitePoint = 235;
@@ -461,7 +454,6 @@
         leveled[p] = norm < 0 ? 0 : norm > 255 ? 255 : norm;
       }
 
-      // Nitidez 3x3 (Unsharp Mask) para restaurar traços finos e vírgulas
       for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
           const idx = y * w + x;
@@ -510,7 +502,6 @@
       let s = String(raw).trim().replace(/^[^\d]+|[^\d]+$/g, "");
       if (!s) return "";
 
-      // Caso OCR leia "212 16" ou "8 40" (espaço no lugar da vírgula em baixa resolução)
       const mEspaco = s.match(/^(\d{1,3}(?:[.,]\d{3})*|\d+)\s+(\d{2})$/);
       if (mEspaco) {
         return `${mEspaco[1]},${mEspaco[2]}`;
@@ -518,13 +509,9 @@
 
       s = s.replace(/\s+/g, "");
       if (s.includes(",") && s.includes(".")) {
-        // Ex: 1.359,89 -> mantém formato BR
         const lastComma = s.lastIndexOf(",");
         const lastDot = s.lastIndexOf(".");
-        if (lastComma > lastDot) {
-          return s;
-        }
-        // Ex: 1,359.89 -> converte para 1.359,89
+        if (lastComma > lastDot) return s;
         const partes = s.split(".");
         const dec = partes.pop();
         return `${partes.join("").replace(/,/g, ".")},${dec}`;
@@ -544,14 +531,8 @@
       return s;
     }
 
-    /**
-     * Localiza dinamicamente no resultado do Pass 1 as bandas verticais (0..1)
-     * do cabeçalho de Pedido e da linha de resumo (Emitente / N.Itens / Peso / Total),
-     * independente de quantos itens o pedido tenha.
-     */
     function detectarBandasDinamicas(ocrData, imgWidth, imgHeight) {
       const words = Array.isArray(ocrData?.words) ? ocrData.words : [];
-      let pedidoY = null;
       let resumoYs = [];
 
       for (const w of words) {
@@ -560,11 +541,6 @@
         if (!txt || !bbox) continue;
 
         const yMid = ((bbox.y0 + bbox.y1) / 2) / Math.max(1, imgHeight);
-        const xMid = ((bbox.x0 + bbox.x1) / 2) / Math.max(1, imgWidth);
-
-        if (yMid < 0.45 && xMid > 0.35 && /^ped[a-z0-9]{2,4}/.test(txt)) {
-          pedidoY = yMid;
-        }
 
         if (
           /^emitente/.test(txt) ||
@@ -574,7 +550,6 @@
         ) {
           resumoYs.push(yMid);
         } else if (/^total:?$/.test(txt) && yMid > 0.24) {
-          // Ignora o "Total" do cabeçalho da tabela (que fica logo abaixo de Descrição/Quant)
           resumoYs.push(yMid);
         }
       }
@@ -582,19 +557,13 @@
       let resumoY = null;
       if (resumoYs.length > 0) {
         resumoYs.sort((a, b) => a - b);
-        // Pega o maior Y encontrado (o resumo sempre fica abaixo do cabeçalho da tabela)
         resumoY = resumoYs[resumoYs.length - 1];
       }
 
-      return { pedidoY, resumoY };
+      return { resumoY };
     }
 
-    /**
-     * Pareamento geométrico por coordenadas (bbox) nas palavras reconhecidas:
-     * encontra valores à direita do rótulo na mesma linha horizontal,
-     * mesmo quando há grandes espaços em branco entre o rótulo e o número.
-     */
-    function extrairPorGeometria(ocrData, imgWidth, imgHeight) {
+    function extrairPorGeometria(ocrData, imgWidth, imgHeight, modoTopo = false) {
       const words = Array.isArray(ocrData?.words) ? ocrData.words : [];
       if (words.length === 0) return {};
 
@@ -617,7 +586,7 @@
           };
         });
 
-      const mesmaLinha = (anchor, cand, tolMult = 0.95) => {
+      const mesmaLinha = (anchor, cand, tolMult = 1.0) => {
         const tol = Math.max(anchor.h, cand.h) * tolMult;
         return Math.abs(cand.yMid - anchor.yMid) <= tol && cand.x0 >= anchor.x0 - 4;
       };
@@ -626,20 +595,34 @@
       let cliente = "";
       let peso = "";
       let total = "";
-      let nItens = null;
 
-      // 1. Pedido
-      const pedidoAnchor = normWords.find((w) => w.yNorm < 0.45 && /^ped[a-z0-9]{2,4}:?$/.test(w.lower));
+      // 1. Pedido por âncora
+      const pedidoAnchor = normWords.find((w) => (modoTopo || w.yNorm < 0.45) && /^ped[a-z0-9]{2,4}:?$/.test(w.lower));
       if (pedidoAnchor) {
         const direita = normWords
-          .filter((w) => w !== pedidoAnchor && mesmaLinha(pedidoAnchor, w, 1.1))
+          .filter((w) => w !== pedidoAnchor && mesmaLinha(pedidoAnchor, w, 1.25))
           .sort((a, b) => a.x0 - b.x0);
         for (const cand of direita) {
           const digits = cand.text.replace(/\D/g, "");
-          if (digits.length >= 6 && digits.length <= 14 && !cand.text.includes("/")) {
+          if (digits.length >= 6 && digits.length <= 14 && !cand.text.includes("/") && !cand.text.includes(".")) {
             pedido = digits;
             break;
           }
+        }
+      }
+
+      // 1b. Fallback geométrico no topo direito: número puro de 8 a 14 dígitos (não-data, não-CNPJ)
+      if (!pedido) {
+        const candLongos = normWords
+          .filter((w) => {
+            if (!modoTopo && (w.yNorm > 0.35 || w.xNorm < 0.42)) return false;
+            if (w.text.includes("/") || w.text.includes(".") || w.text.includes("-")) return false;
+            const d = w.text.replace(/\D/g, "");
+            return d.length >= 8 && d.length <= 14;
+          })
+          .sort((a, b) => a.yMid - b.yMid);
+        if (candLongos.length > 0) {
+          pedido = candLongos[0].text.replace(/\D/g, "");
         }
       }
 
@@ -658,18 +641,7 @@
         }
       }
 
-      // 3. N.Itens
-      const itensAnchor = normWords.find((w) => /itens:?$/.test(w.lower));
-      if (itensAnchor) {
-        const direita = normWords
-          .filter((w) => w !== itensAnchor && mesmaLinha(itensAnchor, w, 1.0))
-          .sort((a, b) => a.x0 - b.x0);
-        if (direita[0] && /^\d{1,4}$/.test(direita[0].text)) {
-          nItens = Number(direita[0].text);
-        }
-      }
-
-      // 4. Peso
+      // 3. Peso
       const pesoAnchor = normWords.find((w) => /^peso:?$/.test(w.lower));
       if (pesoAnchor) {
         const direita = normWords
@@ -682,14 +654,14 @@
         }
       }
 
-      // 5. Total (pega o Total mais abaixo na imagem, que é o Total do pedido no rodapé)
+      // 4. Total
       const totalAnchors = normWords
         .filter((w) => /^total:?$/.test(w.lower))
         .sort((a, b) => b.yMid - a.yMid);
 
       for (const tAnchor of totalAnchors) {
         const direita = normWords
-          .filter((w) => w !== tAnchor && mesmaLinha(tAnchor, w, 1.05))
+          .filter((w) => w !== tAnchor && mesmaLinha(tAnchor, w, 1.1))
           .sort((a, b) => a.x0 - b.x0);
         const trecho = direita.slice(0, 3).map((d) => d.text).join(" ");
         const mVal = trecho.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+\s+\d{2})/);
@@ -699,7 +671,7 @@
         }
       }
 
-      return { cliente, pedido, peso, total, nItens };
+      return { cliente, pedido, peso, total };
     }
 
     function extrairPorTexto(textoCompleto, textoTopoDir, textoResumo) {
@@ -707,7 +679,7 @@
 
       // 1. Pedido
       let pedido = "";
-      const mPedidoTopo = textoTopoDir.match(/Ped[a-z0-9]{2,4}[^\d]{0,20}(\d{6,14})\b/i);
+      const mPedidoTopo = textoTopoDir.match(/Ped[a-z0-9]{2,4}[^\d\n]{0,20}(\d{6,14})\b/i);
       if (mPedidoTopo?.[1]) {
         pedido = mPedidoTopo[1];
       } else {
@@ -715,7 +687,7 @@
         if (longosTopo.length > 0) {
           pedido = longosTopo[0];
         } else {
-          const mPedidoGeral = combinado.match(/Ped[a-z0-9]{2,4}[^\d]{0,20}(\d{6,14})\b/i);
+          const mPedidoGeral = combinado.match(/Ped[a-z0-9]{2,4}[^\d\n]{0,20}(\d{6,14})\b/i);
           if (mPedidoGeral?.[1]) {
             pedido = mPedidoGeral[1];
           } else {
@@ -748,7 +720,7 @@
         peso = normalizarDecimalBr(mPeso[1]);
       }
 
-      // 4. Total: permite espaços e até 1 quebra de linha entre "Total" e o valor monetário
+      // 4. Total
       let total = "";
       const regexValor = /(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+\s+\d{2})/g;
 
@@ -756,7 +728,6 @@
       if (mTotalResumo?.[1]) {
         total = normalizarDecimalBr(mTotalResumo[1]);
       } else {
-        // Caso o recorte do resumo tenha pego apenas o número no final da linha (ex: "Emitente ... 8,40 Kg 212,16")
         const valoresResumo = Array.from(textoResumo.matchAll(regexValor)).map((m) => normalizarDecimalBr(m[1]));
         if (valoresResumo.length >= 2) {
           total = valoresResumo[valoresResumo.length - 1];
@@ -774,7 +745,6 @@
         }
       }
 
-      // Fallback final para pedido de 1 item: pega o último valor monetário da linha do produto se N.Itens == 1
       if (!total) {
         const mItens = combinado.match(/Itens[^\d]{0,10}(\d+)/i);
         if (mItens && Number(mItens[1]) === 1) {
@@ -801,36 +771,27 @@
       await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "3" });
       const fullRes = await worker.recognize(fullPrep.dataUrl);
 
-      const geoFull = extrairPorGeometria(fullRes.data, fullPrep.width, fullPrep.height);
+      const geoFull = extrairPorGeometria(fullRes.data, fullPrep.width, fullPrep.height, false);
       const bandas = detectarBandasDinamicas(fullRes.data, fullPrep.width, fullPrep.height);
 
-      // Passada 2: Recorte focado na faixa do Pedido (topo direito, coordenada dinâmica)
+      // Passada 2: Recorte amplo do canto superior direito (sem whitelist rígida para preservar quebras de linha)
       etapaOcrBasePct = 40;
       etapaOcrFaixaPct = 30;
-      const pedRy = bandas.pedidoY !== null ? Math.max(0, bandas.pedidoY - 0.06) : 0.02;
-      const pedRh = bandas.pedidoY !== null ? 0.14 : 0.34;
-      const topoDirPrep = criarRecorteAdaptativo(img, 0.40, pedRy, 0.60, pedRh, 2400, 28, 0.55);
-      await worker.setParameters({
-        tessedit_char_whitelist: "0123456789PedidoCarregData:/ ",
-        tessedit_pageseg_mode: "6"
-      });
+      const topoDirPrep = criarRecorteAdaptativo(img, 0.35, 0.0, 0.65, 0.36, 2600, 28, 0.50);
+      await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "11" });
       const topoDirRes = await worker.recognize(topoDirPrep.dataUrl);
-      const geoTopo = extrairPorGeometria(topoDirRes.data, topoDirPrep.width, topoDirPrep.height);
+      const geoTopo = extrairPorGeometria(topoDirRes.data, topoDirPrep.width, topoDirPrep.height, true);
 
       // Passada 3: Recorte focado na linha dinâmica de resumo (Emitente / N.Itens / Peso / Total)
       etapaOcrBasePct = 70;
       etapaOcrFaixaPct = 30;
-      const resRy = bandas.resumoY !== null ? Math.max(0.18, bandas.resumoY - 0.045) : 0.28;
-      const resRh = bandas.resumoY !== null ? 0.095 : 0.48;
+      const resRy = bandas.resumoY !== null ? Math.max(0.18, bandas.resumoY - 0.05) : 0.28;
+      const resRh = bandas.resumoY !== null ? 0.105 : 0.48;
       const resumoPrep = criarRecorteAdaptativo(img, 0.0, resRy, 1.0, resRh, 2800, 28, 0.55);
-      await worker.setParameters({
-        tessedit_char_whitelist: "0123456789.,TotalPesoItensEmitenteKgR$: ",
-        tessedit_pageseg_mode: "6"
-      });
+      await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "6" });
       const resumoRes = await worker.recognize(resumoPrep.dataUrl);
-      const geoResumo = extrairPorGeometria(resumoRes.data, resumoPrep.width, resumoPrep.height);
+      const geoResumo = extrairPorGeometria(resumoRes.data, resumoPrep.width, resumoPrep.height, false);
 
-      // Restaura parâmetros padrão do worker
       await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "3" });
       etapaOcrBasePct = 0;
 
