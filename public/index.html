@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Fennix OCR Pedidos — Editor BASE</title>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
     :root {
       --bg: #0f172a;
@@ -33,9 +34,13 @@
       background: var(--accent); color: #0f172a; border: none; border-radius: 8px;
       padding: 10px 14px; font-weight: 600; cursor: pointer;
     }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
     button.secondary { background: #334155; color: var(--text); }
-    .status { font-size: 0.9rem; padding: 10px 12px; border-radius: 8px; background: #0f172a; border: 1px solid var(--border); margin-top: 10px; }
+    .status {
+      font-size: 0.88rem; padding: 10px 12px; border-radius: 8px;
+      background: #0f172a; border: 1px solid var(--border); margin-top: 10px;
+      white-space: pre-wrap; word-break: break-word;
+    }
     .thumbs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
     .thumbs img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.9rem; }
@@ -46,7 +51,7 @@
 <body>
   <div class="container">
     <h1>Fennix OCR Pedidos</h1>
-    <p class="sub">Adiciona pedidos à aba <strong>BASE </strong> preservando formatação, tabelas dinâmicas e segmentações do arquivo .xlsx.</p>
+    <p class="sub">Lê prints via OCR, adiciona à aba <strong>BASE </strong> preservando XML/estilos e libera download apenas após incluir itens.</p>
 
     <div class="grid">
       <div class="card">
@@ -108,6 +113,7 @@
     let baseSheetPath = null;
     let arquivoOriginalNome = "planilha_atualizada.xlsx";
     let pedidosAdicionados = [];
+    let ocrWorker = null;
 
     const xlsxInput = document.getElementById("xlsxInput");
     const imgInput = document.getElementById("imgInput");
@@ -116,6 +122,10 @@
     const addBtn = document.getElementById("addBtn");
     const downloadBtn = document.getElementById("downloadBtn");
     const tabelaPedidos = document.getElementById("tabelaPedidos");
+
+    function atualizarEstadoDownload() {
+      downloadBtn.disabled = !(zipInstance && baseSheetPath && pedidosAdicionados.length > 0);
+    }
 
     function setStatus(msg, isError = false) {
       statusBox.textContent = msg;
@@ -192,12 +202,12 @@
         const buffer = await file.arrayBuffer();
         zipInstance = await JSZip.loadAsync(buffer);
         baseSheetPath = await localizarAbaBase(zipInstance);
-        downloadBtn.disabled = false;
-        setStatus(`Planilha carregada. Aba alvo localizada: ${baseSheetPath}`);
+        atualizarEstadoDownload();
+        setStatus(`Planilha carregada. Aba alvo: ${baseSheetPath}. Adicione pelo menos 1 pedido para liberar o download.`);
       } catch (err) {
         zipInstance = null;
         baseSheetPath = null;
-        downloadBtn.disabled = true;
+        atualizarEstadoDownload();
         setStatus(err.message || "Falha ao ler o arquivo .xlsx.", true);
       }
     });
@@ -216,14 +226,98 @@
       );
     }
 
-    async function processarPrint(file) {
-      const baseName = file.name.replace(/\.[^/.]+$/, "");
-      return {
-        cliente: "",
-        pedido: baseName,
-        peso: "",
-        total: ""
-      };
+    function preProcessarImagemCanvas(dataUrl, scale = 2.5) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(img.width * scale));
+          canvas.height = Math.max(1, Math.round(img.height * scale));
+          const ctx = canvas.getContext("2d");
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const d = imageData.data;
+          const contrast = 1.45;
+          const intercept = 128 * (1 - contrast);
+
+          for (let i = 0; i < d.length; i += 4) {
+            const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+            const adj = Math.min(255, Math.max(0, gray * contrast + intercept));
+            d[i] = adj;
+            d[i + 1] = adj;
+            d[i + 2] = adj;
+          }
+          ctx.putImageData(imageData, 0, 0);
+          resolve(canvas.toDataURL("image/png"));
+        };
+        img.onerror = () => reject(new Error("Falha ao renderizar imagem no canvas."));
+        img.src = dataUrl;
+      });
+    }
+
+    async function obterWorkerTesseract() {
+      if (ocrWorker) return ocrWorker;
+      ocrWorker = await Tesseract.createWorker("por+eng", 1, {
+        logger: (m) => {
+          if (m.status === "recognizing text") {
+            setStatus(`OCR em andamento: ${Math.round((m.progress || 0) * 100)}%...`);
+          }
+        }
+      });
+      await ocrWorker.setParameters({
+        preserve_interword_spaces: "1"
+      });
+      return ocrWorker;
+    }
+
+    function extrairDadosPedidoDoTexto(textoBruto) {
+      const limpo = textoBruto.replace(/\r/g, "\n").trim();
+
+      const padroesPedido = [
+        /(?:ped(?:ido)?|n[º°o.]*|num(?:ero)?|cod(?:igo)?|ref|#|os)\s*[:#\-–.]*\s*([A-Z0-9]{2,15})/i,
+        /\b(\d{4,12})\b/
+      ];
+
+      let pedido = "";
+      for (const rx of padroesPedido) {
+        const m = limpo.match(rx);
+        if (m && m[1]) {
+          pedido = m[1].trim();
+          break;
+        }
+      }
+
+      const clienteMatch = limpo.match(/(?:cliente|nome|destinat[aá]rio|raz[aã]o)\s*[:\-–]\s*([^\n]{2,60})/i);
+      const cliente = clienteMatch ? clienteMatch[1].trim() : "";
+
+      const pesoMatch = limpo.match(/(?:peso|kg)\s*[:\-–]?\s*(\d+(?:[.,]\d+)?)/i);
+      const peso = pesoMatch ? pesoMatch[1].replace(",", ".") : "";
+
+      const totalMatch = limpo.match(/(?:total|valor|r\$)\s*[:\-–]?\s*(\d+(?:[.,]\d{1,2})?)/i);
+      const total = totalMatch ? totalMatch[1].replace(",", ".") : "";
+
+      return { cliente, pedido, peso, total, textoBruto: limpo };
+    }
+
+    async function processarPrint(itemImg) {
+      const preparedDataUrl = await preProcessarImagemCanvas(itemImg.dataUrl, 2.5);
+      const worker = await obterWorkerTesseract();
+      const { data } = await worker.recognize(preparedDataUrl);
+      const extraido = extrairDadosPedidoDoTexto(data.text || "");
+
+      if (!extraido.pedido) {
+        const fallbackNome = itemImg.file.name.replace(/\.[^/.]+$/, "");
+        return {
+          ...extraido,
+          pedido: fallbackNome,
+          aviso: `OCR não isolou o número do pedido em "${itemImg.file.name}"; preenchido rascunho "${fallbackNome}" para conferência.`
+        };
+      }
+
+      return { ...extraido, aviso: "" };
     }
 
     function render() {
@@ -239,6 +333,7 @@
         `;
         tabelaPedidos.appendChild(tr);
       });
+      atualizarEstadoDownload();
     }
 
     imgInput.addEventListener("change", async (e) => {
@@ -255,13 +350,20 @@
           thumbsEl.appendChild(el);
         }
 
-        const sugestao = await processarPrint(imagens[0].file);
-        if (sugestao.pedido && !document.getElementById("pedidoInput").value) {
-          document.getElementById("pedidoInput").value = sugestao.pedido;
+        const resultado = await processarPrint(imagens[0]);
+        if (resultado.pedido) document.getElementById("pedidoInput").value = resultado.pedido;
+        if (resultado.cliente) document.getElementById("clienteInput").value = resultado.cliente;
+        if (resultado.peso) document.getElementById("pesoInput").value = resultado.peso;
+        if (resultado.total) document.getElementById("totalInput").value = resultado.total;
+
+        const resumoTexto = resultado.textoBruto ? `\nTexto OCR:\n${resultado.textoBruto.slice(0, 350)}` : "";
+        if (resultado.aviso) {
+          setStatus(`${resultado.aviso}${resumoTexto}`, true);
+        } else {
+          setStatus(`OCR concluído para "${imagens[0].file.name}" (Pedido: ${resultado.pedido}).${resumoTexto}`);
         }
-        setStatus(`${imagens.length} imagem(ns) carregada(s). Revise ou preencha os campos e clique em "Adicionar à BASE".`);
       } catch (err) {
-        setStatus(err.message || "Erro ao processar imagens.", true);
+        setStatus(`Erro ao ler ${files[0]?.name || "imagem"}: ${err.message || "Falha no OCR."}`, true);
       }
     });
 
@@ -295,7 +397,7 @@
       const novaLinha = Math.max(maxRowAtual, ultimaLinha);
       const novoRef = `${startCol}${startRow}:${novaCol}${novaLinha}`;
 
-      return xmlText.replace(dimRegex, `<dimension${attrs.replace(/ref="[^"]*"/, `ref="${novoRef}"`)}\/>`);
+      return xmlText.replace(dimRegex, `<dimension${attrs.replace(/ref="[^"]*"/, `ref="${novoRef}"`)}/>`);
     }
 
     async function adicionarNaPlanilha() {
@@ -353,15 +455,15 @@
         document.getElementById("pesoInput").value = "";
         document.getElementById("totalInput").value = "";
 
-        setStatus(`Linha ${proximaLinha} adicionada à aba "${TARGET_SHEET_NAME}" preservando o restante do arquivo.`);
+        setStatus(`Linha ${proximaLinha} adicionada à aba "${TARGET_SHEET_NAME}". Botão de download liberado.`);
       } catch (err) {
         setStatus(err.message || "Erro ao atualizar a aba BASE.", true);
       }
     }
 
     async function baixarPlanilha() {
-      if (!zipInstance) {
-        setStatus("Nenhuma planilha carregada para download.", true);
+      if (!zipInstance || pedidosAdicionados.length === 0) {
+        setStatus("Adicione ao menos um pedido antes de baixar a planilha.", true);
         return;
       }
 
@@ -383,6 +485,7 @@
 
     addBtn.addEventListener("click", adicionarNaPlanilha);
     downloadBtn.addEventListener("click", baixarPlanilha);
+    atualizarEstadoDownload();
   </script>
 </body>
 </html>
