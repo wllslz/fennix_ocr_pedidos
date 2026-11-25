@@ -19,10 +19,10 @@
     }
     * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
     body { margin: 0; background: var(--bg); color: var(--text); padding: 24px; }
-    .container { max-width: 1080px; margin: 0 auto; }
+    .container { max-width: 1120px; margin: 0 auto; }
     h1 { margin: 0 0 8px; font-size: 1.5rem; }
     p.sub { margin: 0 0 20px; color: var(--muted); }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 20px; }
     .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
     label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
     input[type="file"], input[type="text"], input[type="number"] {
@@ -37,12 +37,12 @@
     button:disabled { opacity: 0.45; cursor: not-allowed; }
     button.secondary { background: #334155; color: var(--text); }
     .status {
-      font-size: 0.88rem; padding: 10px 12px; border-radius: 8px;
+      font-size: 0.85rem; padding: 10px 12px; border-radius: 8px;
       background: #0f172a; border: 1px solid var(--border); margin-top: 10px;
-      white-space: pre-wrap; word-break: break-word;
+      white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow-y: auto;
     }
     .thumbs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-    .thumbs img { width: 96px; height: 96px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+    .thumbs img { width: 120px; height: 90px; object-fit: contain; background: #0f172a; border-radius: 8px; border: 1px solid var(--border); }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.9rem; }
     th, td { border-bottom: 1px solid var(--border); padding: 8px; text-align: left; }
     th { color: var(--muted); }
@@ -51,7 +51,7 @@
 <body>
   <div class="container">
     <h1>Fennix OCR Pedidos</h1>
-    <p class="sub">Lê prints via OCR, adiciona à aba <strong>BASE </strong> preservando XML/estilos e libera download apenas após incluir itens.</p>
+    <p class="sub">Extrai código do cliente, nº do pedido, peso e total via OCR e grava na aba <strong>BASE </strong> preservando XML/estilos.</p>
 
     <div class="grid">
       <div class="card">
@@ -66,22 +66,22 @@
       </div>
 
       <div class="card">
-        <label for="clienteInput">Cliente</label>
-        <input id="clienteInput" type="text" placeholder="Nome do cliente" />
+        <label for="clienteInput">Código do Cliente</label>
+        <input id="clienteInput" type="text" placeholder="Ex.: 14660" />
 
         <div class="row">
           <div>
             <label for="pedidoInput">Nº Pedido</label>
-            <input id="pedidoInput" type="text" placeholder="Ex.: 1045" />
+            <input id="pedidoInput" type="text" placeholder="Ex.: 4731000665" />
           </div>
           <div>
             <label for="pesoInput">Peso (kg)</label>
-            <input id="pesoInput" type="number" step="0.01" placeholder="0.00" />
+            <input id="pesoInput" type="text" placeholder="Ex.: 20,16" />
           </div>
         </div>
 
         <label for="totalInput">Total (R$)</label>
-        <input id="totalInput" type="number" step="0.01" placeholder="0.00" />
+        <input id="totalInput" type="text" placeholder="Ex.: 359,89" />
 
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
           <button id="addBtn" type="button">Adicionar à BASE</button>
@@ -96,7 +96,7 @@
         <thead>
           <tr>
             <th>#</th>
-            <th>Cliente</th>
+            <th>Cód. Cliente</th>
             <th>Pedido</th>
             <th>Peso</th>
             <th>Total</th>
@@ -226,36 +226,45 @@
       );
     }
 
-    function preProcessarImagemCanvas(dataUrl, scale = 2.5) {
+    function carregarImagem(dataUrl) {
       return new Promise((resolve, reject) => {
         const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.max(1, Math.round(img.width * scale));
-          canvas.height = Math.max(1, Math.round(img.height * scale));
-          const ctx = canvas.getContext("2d");
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = "high";
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const d = imageData.data;
-          const contrast = 1.45;
-          const intercept = 128 * (1 - contrast);
-
-          for (let i = 0; i < d.length; i += 4) {
-            const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-            const adj = Math.min(255, Math.max(0, gray * contrast + intercept));
-            d[i] = adj;
-            d[i + 1] = adj;
-            d[i + 2] = adj;
-          }
-          ctx.putImageData(imageData, 0, 0);
-          resolve(canvas.toDataURL("image/png"));
-        };
-        img.onerror = () => reject(new Error("Falha ao renderizar imagem no canvas."));
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("Falha ao carregar imagem no navegador."));
         img.src = dataUrl;
       });
+    }
+
+    function criarRecorteProcessado(img, rx, ry, rw, rh, scale = 3) {
+      const sx = Math.max(0, Math.floor(img.width * rx));
+      const sy = Math.max(0, Math.floor(img.height * ry));
+      const sw = Math.max(1, Math.min(img.width - sx, Math.floor(img.width * rw)));
+      const sh = Math.max(1, Math.min(img.height - sy, Math.floor(img.height * rh)));
+
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(sw * scale));
+      canvas.height = Math.max(1, Math.round(sh * scale));
+      const ctx = canvas.getContext("2d");
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = imageData.data;
+      const contrast = 1.65;
+      const intercept = 128 * (1 - contrast);
+
+      for (let i = 0; i < d.length; i += 4) {
+        const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        let adj = Math.min(255, Math.max(0, gray * contrast + intercept));
+        adj = adj < 155 ? Math.max(0, adj * 0.45) : Math.min(255, 255 - (255 - adj) * 0.35);
+        d[i] = adj;
+        d[i + 1] = adj;
+        d[i + 2] = adj;
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+      return canvas.toDataURL("image/png");
     }
 
     async function obterWorkerTesseract() {
@@ -267,53 +276,103 @@
           }
         }
       });
-      await ocrWorker.setParameters({
-        preserve_interword_spaces: "1"
-      });
       return ocrWorker;
     }
 
-    function extrairDadosPedidoDoTexto(textoBruto) {
-      const limpo = textoBruto.replace(/\r/g, "\n").trim();
+    function extrairDadosPedido(textoCompleto, textoTopoDir, textoClienteEsq, textoTotais) {
+      const base = `${textoTopoDir}\n${textoClienteEsq}\n${textoTotais}\n${textoCompleto}`
+        .replace(/\r/g, "\n")
+        .trim();
 
-      const padroesPedido = [
-        /(?:ped(?:ido)?|n[º°o.]*|num(?:ero)?|cod(?:igo)?|ref|#|os)\s*[:#\-–.]*\s*([A-Z0-9]{2,15})/i,
-        /\b(\d{4,12})\b/
-      ];
-
+      // 1) Nº Pedido: prioriza números de 5 a 14 dígitos próximos a "Pedido" ou no topo direito
       let pedido = "";
-      for (const rx of padroesPedido) {
-        const m = limpo.match(rx);
-        if (m && m[1]) {
-          pedido = m[1].trim();
-          break;
+      const rxPedidoRotulo = /\bPedido\b[^\d\n]{0,18}(\d{5,14})\b/i;
+      const mPedidoRotulo = base.match(rxPedidoRotulo);
+      if (mPedidoRotulo && mPedidoRotulo[1]) {
+        pedido = mPedidoRotulo[1];
+      } else {
+        const candidatosLongos = Array.from(textoTopoDir.matchAll(/\b(\d{6,14})\b/g)).map((m) => m[1]);
+        if (candidatosLongos.length > 0) {
+          pedido = candidatosLongos[0];
+        } else {
+          const candidatosGerais = Array.from(textoCompleto.matchAll(/\b(\d{6,14})\b/g)).map((m) => m[1]);
+          pedido = candidatosGerais[0] || "";
         }
       }
 
-      const clienteMatch = limpo.match(/(?:cliente|nome|destinat[aá]rio|raz[aã]o)\s*[:\-–]\s*([^\n]{2,60})/i);
-      const cliente = clienteMatch ? clienteMatch[1].trim() : "";
+      // 2) Código do Cliente: captura o código numérico logo após "Cliente" (ex.: 14660)
+      let clienteCodigo = "";
+      const rxClienteCod = /\bCliente\b[^\d\n]{0,15}(\d{2,10})\b/i;
+      const mClienteCod = base.match(rxClienteCod);
+      if (mClienteCod && mClienteCod[1]) {
+        clienteCodigo = mClienteCod[1];
+      } else {
+        const candidatosCliente = Array.from(textoClienteEsq.matchAll(/\b(\d{3,8})\b/g)).map((m) => m[1]);
+        clienteCodigo = candidatosCliente[0] || "";
+      }
 
-      const pesoMatch = limpo.match(/(?:peso|kg)\s*[:\-–]?\s*(\d+(?:[.,]\d+)?)/i);
-      const peso = pesoMatch ? pesoMatch[1].replace(",", ".") : "";
+      // 3) Peso (kg)
+      let peso = "";
+      const mPeso = base.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
+      if (mPeso && mPeso[1]) {
+        peso = mPeso[1];
+      }
 
-      const totalMatch = limpo.match(/(?:total|valor|r\$)\s*[:\-–]?\s*(\d+(?:[.,]\d{1,2})?)/i);
-      const total = totalMatch ? totalMatch[1].replace(",", ".") : "";
+      // 4) Total (R$): prioriza o total final da linha de totais / rodapé
+      let total = "";
+      const mTotalLinha = textoTotais.match(/\bTotal\b[^\d\n]{0,18}(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})/i);
+      if (mTotalLinha && mTotalLinha[1]) {
+        total = mTotalLinha[1];
+      } else {
+        const mTotalGeral = base.match(/\bTotal\b[^\d\n]{0,18}(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})/i);
+        if (mTotalGeral && mTotalGeral[1]) {
+          total = mTotalGeral[1];
+        }
+      }
 
-      return { cliente, pedido, peso, total, textoBruto: limpo };
+      return {
+        cliente: clienteCodigo,
+        pedido,
+        peso,
+        total,
+        textoBruto: textoCompleto.trim()
+      };
     }
 
     async function processarPrint(itemImg) {
-      const preparedDataUrl = await preProcessarImagemCanvas(itemImg.dataUrl, 2.5);
+      const img = await carregarImagem(itemImg.dataUrl);
+      const fullPrep = criarRecorteProcessado(img, 0, 0, 1, 1, 2.5);
+      const topoDirPrep = criarRecorteProcessado(img, 0.55, 0.08, 0.45, 0.25, 3.5);
+      const clienteEsqPrep = criarRecorteProcessado(img, 0, 0.14, 0.65, 0.22, 3.5);
+      const totaisPrep = criarRecorteProcessado(img, 0.4, 0.36, 0.6, 0.16, 3.5);
+
       const worker = await obterWorkerTesseract();
-      const { data } = await worker.recognize(preparedDataUrl);
-      const extraido = extrairDadosPedidoDoTexto(data.text || "");
+
+      await worker.setParameters({ tessedit_char_whitelist: "" });
+      const fullRes = await worker.recognize(fullPrep);
+
+      await worker.setParameters({ tessedit_char_whitelist: "0123456789Pedido: " });
+      const topoDirRes = await worker.recognize(topoDirPrep);
+
+      await worker.setParameters({ tessedit_char_whitelist: "0123456789Cliente- " });
+      const clienteEsqRes = await worker.recognize(clienteEsqPrep);
+
+      await worker.setParameters({ tessedit_char_whitelist: "0123456789.,TotalPesoKg " });
+      const totaisRes = await worker.recognize(totaisPrep);
+
+      await worker.setParameters({ tessedit_char_whitelist: "" });
+
+      const extraido = extrairDadosPedido(
+        fullRes.data?.text || "",
+        topoDirRes.data?.text || "",
+        clienteEsqRes.data?.text || "",
+        totaisRes.data?.text || ""
+      );
 
       if (!extraido.pedido) {
-        const fallbackNome = itemImg.file.name.replace(/\.[^/.]+$/, "");
         return {
           ...extraido,
-          pedido: fallbackNome,
-          aviso: `OCR não isolou o número do pedido em "${itemImg.file.name}"; preenchido rascunho "${fallbackNome}" para conferência.`
+          aviso: `OCR não isolou o número do pedido em "${itemImg.file.name}". Confira ou digite manualmente.`
         };
       }
 
@@ -350,17 +409,30 @@
           thumbsEl.appendChild(el);
         }
 
+        document.getElementById("clienteInput").value = "";
+        document.getElementById("pedidoInput").value = "";
+        document.getElementById("pesoInput").value = "";
+        document.getElementById("totalInput").value = "";
+
         const resultado = await processarPrint(imagens[0]);
-        if (resultado.pedido) document.getElementById("pedidoInput").value = resultado.pedido;
         if (resultado.cliente) document.getElementById("clienteInput").value = resultado.cliente;
+        if (resultado.pedido) document.getElementById("pedidoInput").value = resultado.pedido;
         if (resultado.peso) document.getElementById("pesoInput").value = resultado.peso;
         if (resultado.total) document.getElementById("totalInput").value = resultado.total;
 
-        const resumoTexto = resultado.textoBruto ? `\nTexto OCR:\n${resultado.textoBruto.slice(0, 350)}` : "";
+        const resumo = [
+          `Cód. Cliente: ${resultado.cliente || "-"}`,
+          `Pedido: ${resultado.pedido || "-"}`,
+          `Peso: ${resultado.peso || "-"}`,
+          `Total: ${resultado.total || "-"}`,
+          "",
+          resultado.textoBruto || ""
+        ].join("\n");
+
         if (resultado.aviso) {
-          setStatus(`${resultado.aviso}${resumoTexto}`, true);
+          setStatus(`${resultado.aviso}\n\n${resumo}`, true);
         } else {
-          setStatus(`OCR concluído para "${imagens[0].file.name}" (Pedido: ${resultado.pedido}).${resumoTexto}`);
+          setStatus(`OCR concluído para "${imagens[0].file.name}".\n${resumo}`);
         }
       } catch (err) {
         setStatus(`Erro ao ler ${files[0]?.name || "imagem"}: ${err.message || "Falha no OCR."}`, true);
@@ -372,8 +444,9 @@
       if (valor === "" || valor === null || valor === undefined) {
         return `<c r="${ref}"${styleAttr}/>`;
       }
-      const num = Number(String(valor).replace(",", "."));
-      if (!Number.isNaN(num) && String(valor).trim() !== "") {
+      const normalizadoNum = String(valor).replace(/\s+/g, "").replace(",", ".");
+      const num = Number(normalizadoNum);
+      if (!Number.isNaN(num) && normalizadoNum !== "" && !/^0\d+/.test(normalizadoNum)) {
         return `<c r="${ref}"${styleAttr}><v>${num}</v></c>`;
       }
       return `<c r="${ref}" t="inlineStr"${styleAttr}><is><t xml:space="preserve">${escapeXml(String(valor))}</t></is></c>`;
