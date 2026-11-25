@@ -41,6 +41,18 @@
       background: #0f172a; border: 1px solid var(--border); margin-top: 10px;
       white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow-y: auto;
     }
+    .linha-destaque {
+      margin-top: 14px; padding: 12px; border-radius: 10px;
+      background: #0f172a; border: 1px solid var(--border); font-size: 0.88rem;
+    }
+    .linha-destaque strong { color: var(--accent); }
+    .celulas-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px; margin-top: 10px; font-size: 0.82rem;
+    }
+    .celula-box {
+      background: #1e293b; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+    }
     .thumbs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
     .thumbs img { width: 120px; height: 90px; object-fit: contain; background: #0f172a; border-radius: 8px; border: 1px solid var(--border); }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.9rem; }
@@ -87,6 +99,11 @@
           <button id="addBtn" type="button">Adicionar à BASE</button>
           <button id="downloadBtn" type="button" class="secondary" disabled>Baixar .xlsx atualizado</button>
         </div>
+
+        <div class="linha-destaque" id="ultimaLinhaBox">
+          <div><strong>Linha preenchida na aba BASE:</strong> <span id="linhaNumeroLabel">Nenhuma linha gravada ainda</span></div>
+          <div class="celulas-grid" id="linhaCelulasGrid"></div>
+        </div>
       </div>
     </div>
 
@@ -124,6 +141,8 @@
     const addBtn = document.getElementById("addBtn");
     const downloadBtn = document.getElementById("downloadBtn");
     const tabelaPedidos = document.getElementById("tabelaPedidos");
+    const linhaNumeroLabel = document.getElementById("linhaNumeroLabel");
+    const linhaCelulasGrid = document.getElementById("linhaCelulasGrid");
 
     function atualizarEstadoDownload() {
       downloadBtn.disabled = !(zipInstance && baseSheetPath && pedidosAdicionados.length > 0);
@@ -142,16 +161,6 @@
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&apos;");
-    }
-
-    function indiceParaColuna(num) {
-      let s = "";
-      while (num > 0) {
-        const resto = (num - 1) % 26;
-        s = String.fromCharCode(65 + resto) + s;
-        num = Math.floor((num - 1) / 26);
-      }
-      return s;
     }
 
     function normalizarCaminhoZip(target) {
@@ -208,6 +217,8 @@
         baseSheetPath = await localizarAbaBase(zipInstance);
         sharedStringsList = await carregarSharedStrings(zipInstance);
         pedidosAdicionados = [];
+        linhaNumeroLabel.textContent = "Nenhuma linha gravada ainda";
+        linhaCelulasGrid.innerHTML = "";
         render();
         atualizarEstadoDownload();
         setStatus(`Planilha carregada. Aba alvo: ${baseSheetPath}. Adicione pelo menos 1 pedido para liberar o download.`);
@@ -382,13 +393,30 @@
       return { ...extraido, aviso: "" };
     }
 
+    function renderUltimaLinha(item) {
+      if (!item) return;
+      linhaNumeroLabel.textContent = `Linha ${item.linha} (${TARGET_SHEET_NAME.trim()})`;
+      const detalhes = [
+        { ref: `A${item.linha}`, rotulo: "Data (serial)", val: item.dataDisplay || "-" },
+        { ref: `B${item.linha}`, rotulo: "Mês", val: item.mesDisplay || "-" },
+        { ref: `C${item.linha}`, rotulo: "Cliente", val: item.cliente || "-" },
+        { ref: `D${item.linha}`, rotulo: "Peso kg", val: item.peso || "-" },
+        { ref: `E${item.linha}`, rotulo: "Valor R$", val: item.total || "-" },
+        { ref: `F${item.linha}`, rotulo: "Pedido", val: item.pedido || "-" },
+        { ref: `I${item.linha}`, rotulo: "Status", val: item.statusDisplay || "-" }
+      ];
+      linhaCelulasGrid.innerHTML = detalhes
+        .map((d) => `<div class="celula-box"><strong>${d.ref}</strong> (${d.rotulo}): ${escapeXml(d.val)}</div>`)
+        .join("");
+    }
+
     function render() {
       tabelaPedidos.innerHTML = "";
       pedidosAdicionados.forEach((item, idx) => {
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td>${idx + 1}</td>
-          <td>${escapeXml(item.linha)}</td>
+          <td><strong>Linha ${escapeXml(item.linha)}</strong></td>
           <td>${escapeXml(item.cliente)}</td>
           <td>${escapeXml(item.pedido)}</td>
           <td>${escapeXml(item.peso)}</td>
@@ -396,6 +424,9 @@
         `;
         tabelaPedidos.appendChild(tr);
       });
+      if (pedidosAdicionados.length > 0) {
+        renderUltimaLinha(pedidosAdicionados[pedidosAdicionados.length - 1]);
+      }
       atualizarEstadoDownload();
     }
 
@@ -484,7 +515,6 @@
         const rNum = Number(rMatch[1]);
         if (rNum <= 1) continue;
 
-        // Considera linha com conteúdo real se tiver <v> ou <t> com texto (ignora linhas vazias formatadas até 1048504)
         const temValor = /<(?:v|t)[^>]*>[^<\s][^<]*<\/(?:v|t)>/.test(inner);
         if (temValor) {
           ultimaLinhaComConteudo = rNum;
@@ -499,7 +529,6 @@
     }
 
     function extrairEstilosEValoresModelo(ultimaRowXml) {
-      // Padrão base observado na aba BASE (colunas A..L)
       const estilos = {
         A: "56", B: "57", C: "57", D: "58", E: "59", F: "60",
         G: "57", H: "57", I: "57", J: "57", K: "57", L: "57"
@@ -525,7 +554,6 @@
         }
       }
 
-      // Fallback para sharedStrings caso a última linha não tenha mês ou status
       if (!mesSsIdx) {
         const idxNov = sharedStringsList.findIndex((txt) => txt.trim().toLowerCase() === "novembro");
         if (idxNov >= 0) mesSsIdx = String(idxNov);
@@ -587,7 +615,6 @@
 
         const novaLinhaXml = `<row r="${proximaLinha}" spans="1:12" x14ac:dyDescent="0.25">${cA}${cB}${cC}${cD}${cE}${cF}${cG}${cH}${cI}${cJ}${cK}${cL}</row>`;
 
-        // Se já existir uma linha com o mesmo número exato `proximaLinha`, substitui; senão insere em ordem antes da linha seguinte
         const linhaExistenteRegex = new RegExp(`<row\\b[^>]*\\br="${proximaLinha}"[^>]*>[\\s\\S]*?<\\/row>`);
         if (linhaExistenteRegex.test(sheetXml)) {
           sheetXml = sheetXml.replace(linhaExistenteRegex, novaLinhaXml);
@@ -613,12 +640,18 @@
 
         zipInstance.file(baseSheetPath, sheetXml);
 
+        const mesDisplay = mesSsIdx && sharedStringsList[Number(mesSsIdx)] ? sharedStringsList[Number(mesSsIdx)] : mesSsIdx;
+        const statusDisplay = statusSsIdx && sharedStringsList[Number(statusSsIdx)] ? sharedStringsList[Number(statusSsIdx)] : statusSsIdx;
+
         pedidosAdicionados.push({
           linha: proximaLinha,
           cliente: clienteStr,
           pedido: pedidoStr,
           peso: pesoStr,
-          total: totalStr
+          total: totalStr,
+          dataDisplay: dataSerial,
+          mesDisplay,
+          statusDisplay
         });
         render();
 
@@ -627,7 +660,7 @@
         document.getElementById("pesoInput").value = "";
         document.getElementById("totalInput").value = "";
 
-        setStatus(`Linha ${proximaLinha} preenchida na aba "${TARGET_SHEET_NAME}" (Col. A: Data, B: Mês, C: Cliente, D: Peso, E: Valor, F: Pedido). Botão de download liberado.`);
+        setStatus(`Linha ${proximaLinha} preenchida na aba "${TARGET_SHEET_NAME}" (A${proximaLinha}: ${dataSerial || "-"} | B${proximaLinha}: ${mesDisplay || "-"} | C${proximaLinha}: ${clienteStr || "-"} | D${proximaLinha}: ${pesoStr || "-"} | E${proximaLinha}: ${totalStr || "-"} | F${proximaLinha}: ${pedidoStr || "-"} | I${proximaLinha}: ${statusDisplay || "-"}). Botão de download liberado.`);
       } catch (err) {
         setStatus(err.message || "Erro ao atualizar a aba BASE.", true);
       }

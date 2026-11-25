@@ -2,6 +2,14 @@
 
 Todas as mudanças notáveis, diagnósticos e etapas do processo deste projeto serão documentadas neste arquivo.
 
+## [1.2.1] - 2026-11-25
+
+### Processo geral e diagnóstico
+- **Exibição da linha exata na interface:** após identificar que o arquivo enviado anteriormente gravou o registro na linha `1048505` (fora da sequência ativa da aba `BASE `), adicionou-se na interface o destaque visual **Linha preenchida na aba BASE** com o número da linha e o detalhamento das células (`A`, `B`, `C`, `D`, `E`, `F` e `I`), além da coluna **Linha BASE** na tabela da sessão e no log de status.
+
+### Adicionado
+- Bloco **Linha preenchida na aba BASE** na interface exibindo o número da linha gravada e cada célula preenchida (`A` a `F` e `I`).
+
 ## [1.2.0] - 2026-11-25
 
 ### Processo geral e diagnóstico
