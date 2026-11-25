@@ -2,6 +2,15 @@
 
 Todas as mudanças notáveis, diagnósticos e etapas do processo deste projeto serão documentadas neste arquivo.
 
+## [1.3.0] - 2026-11-25
+
+### Processo geral e diagnóstico
+- **Inspeção da planilha atualizada (`MANITORAMENTO EXPEDIÇÃO - 26-01-26 (version 1).xlsb.xlsx`):** confirmou-se que os lançamentos ativos na aba `BASE ` já estão gravados e que as linhas modelo (ex.: `2568` a `2584`) possuem a coluna **M** (`s="61"`, índice de `sharedStrings` referente a `"v"`).
+- **Inclusão preventiva da coluna M na configuração:** para manter o padrão preventivo nas próximas inserções da aba `BASE `, o mapeamento passou a cobrir as colunas `A` a `M` (`spans="1:13"`), herdando estilo e valor da coluna `M` da linha modelo e exibindo `M` na interface.
+
+### Alterado
+- Configuração de colunas da aba `BASE ` expandida de `A..L` para `A..M`, incluindo herança de estilo/valor de `M` e exibição da coluna **Col. M** no painel da última linha gravada e na tabela da sessão.
+
 ## [1.2.1] - 2026-11-25
 
 ### Processo geral e diagnóstico
