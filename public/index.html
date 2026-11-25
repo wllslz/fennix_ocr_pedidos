@@ -54,16 +54,34 @@
       background: #1e293b; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
     }
     .thumbs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
-    .thumbs img { width: 120px; height: 90px; object-fit: contain; background: #0f172a; border-radius: 8px; border: 1px solid var(--border); }
+    .thumbs img {
+      width: 120px; height: 90px; object-fit: contain; background: #0f172a;
+      border-radius: 8px; border: 1px solid var(--border); cursor: pointer;
+    }
+    .thumbs img:hover { border-color: var(--accent); }
     table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.9rem; }
     th, td { border-bottom: 1px solid var(--border); padding: 8px; text-align: left; }
     th { color: var(--muted); }
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(2, 6, 23, 0.86);
+      display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      max-width: 1120px; width: 100%; max-height: 92vh; overflow: auto; padding: 16px;
+    }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .modal-body { display: grid; grid-template-columns: minmax(320px, 1.4fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+    .modal-img-wrap { background: #0f172a; border: 1px solid var(--border); border-radius: 8px; padding: 8px; overflow: auto; max-height: 75vh; }
+    .modal-img-wrap img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+    @media (max-width: 780px) { .modal-body { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Fennix OCR Pedidos</h1>
-    <p class="sub">Preenche a próxima linha ativa da aba <strong>BASE </strong> no formato exato (colunas A a M) mantendo XML e abas intactas. Suporta seleção de ficheiros ou colagem direta com <strong>Ctrl + V</strong>.</p>
+    <p class="sub">Preenche a próxima linha ativa da aba <strong>BASE </strong> no formato exato (colunas A a M) mantendo XML e abas intactas. Suporta seleção, <strong>Ctrl + V</strong> e inspeção ampliada da imagem.</p>
 
     <div class="grid">
       <div class="card">
@@ -72,6 +90,10 @@
 
         <label for="imgInput">2. Prints / imagens de pedidos (ou cole com Ctrl + V)</label>
         <input id="imgInput" type="file" accept="image/*" multiple />
+
+        <div style="margin-bottom:8px;">
+          <button id="openModalBtn" type="button" class="secondary" disabled>Ampliar imagem para conferência</button>
+        </div>
 
         <div class="thumbs" id="thumbs"></div>
         <div class="status" id="statusBox">Aguardando seleção da planilha (.xlsx) e das imagens (ou Ctrl + V).</div>
@@ -126,6 +148,37 @@
     </div>
   </div>
 
+  <div class="modal-backdrop" id="imgModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong id="modalTitle">Conferência visual da imagem</strong>
+        <button id="closeModalBtn" type="button" class="secondary">Fechar (Esc)</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-img-wrap">
+          <img id="modalImg" src="" alt="Imagem ampliada do pedido" />
+        </div>
+        <div>
+          <label for="modalCliente">Código do Cliente (Col. C)</label>
+          <input id="modalCliente" type="text" />
+
+          <label for="modalPedido">Nº Pedido (Col. F)</label>
+          <input id="modalPedido" type="text" />
+
+          <label for="modalPeso">Peso kg (Col. D)</label>
+          <input id="modalPeso" type="text" />
+
+          <label for="modalTotal">Valor R$ (Col. E)</label>
+          <input id="modalTotal" type="text" />
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button id="applyModalBtn" type="button">Aplicar valores nos campos</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     const TARGET_SHEET_NAME = "BASE ";
     let zipInstance = null;
@@ -134,9 +187,12 @@
     let arquivoOriginalNome = "planilha_atualizada.xlsx";
     let pedidosAdicionados = [];
     let ocrWorker = null;
+    let imagensCarregadas = [];
+    let imagemSelecionadaIdx = 0;
 
     const xlsxInput = document.getElementById("xlsxInput");
     const imgInput = document.getElementById("imgInput");
+    const openModalBtn = document.getElementById("openModalBtn");
     const thumbsEl = document.getElementById("thumbs");
     const statusBox = document.getElementById("statusBox");
     const addBtn = document.getElementById("addBtn");
@@ -144,6 +200,16 @@
     const tabelaPedidos = document.getElementById("tabelaPedidos");
     const linhaNumeroLabel = document.getElementById("linhaNumeroLabel");
     const linhaCelulasGrid = document.getElementById("linhaCelulasGrid");
+
+    const imgModal = document.getElementById("imgModal");
+    const closeModalBtn = document.getElementById("closeModalBtn");
+    const modalImg = document.getElementById("modalImg");
+    const modalTitle = document.getElementById("modalTitle");
+    const modalCliente = document.getElementById("modalCliente");
+    const modalPedido = document.getElementById("modalPedido");
+    const modalPeso = document.getElementById("modalPeso");
+    const modalTotal = document.getElementById("modalTotal");
+    const applyModalBtn = document.getElementById("applyModalBtn");
 
     function atualizarEstadoDownload() {
       downloadBtn.disabled = !(zipInstance && baseSheetPath && pedidosAdicionados.length > 0);
@@ -229,6 +295,41 @@
         atualizarEstadoDownload();
         setStatus(err.message || "Falha ao ler o arquivo .xlsx.", true);
       }
+    });
+
+    function abrirModalImagem(idx = 0) {
+      if (!imagensCarregadas[idx]) return;
+      imagemSelecionadaIdx = idx;
+      const atual = imagensCarregadas[idx];
+      modalImg.src = atual.dataUrl;
+      modalTitle.textContent = `Conferência visual — ${atual.file.name}`;
+      modalCliente.value = document.getElementById("clienteInput").value;
+      modalPedido.value = document.getElementById("pedidoInput").value;
+      modalPeso.value = document.getElementById("pesoInput").value;
+      modalTotal.value = document.getElementById("totalInput").value;
+      imgModal.classList.add("open");
+    }
+
+    function fecharModalImagem() {
+      imgModal.classList.remove("open");
+    }
+
+    openModalBtn.addEventListener("click", () => abrirModalImagem(imagemSelecionadaIdx));
+    closeModalBtn.addEventListener("click", fecharModalImagem);
+    imgModal.addEventListener("click", (e) => {
+      if (e.target === imgModal) fecharModalImagem();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && imgModal.classList.contains("open")) {
+        fecharModalImagem();
+      }
+    });
+    applyModalBtn.addEventListener("click", () => {
+      document.getElementById("clienteInput").value = modalCliente.value.trim();
+      document.getElementById("pedidoInput").value = modalPedido.value.trim();
+      document.getElementById("pesoInput").value = modalPeso.value.trim();
+      document.getElementById("totalInput").value = modalTotal.value.trim();
+      fecharModalImagem();
     });
 
     function lerImgs(files) {
@@ -435,16 +536,24 @@
 
     async function processarImagensSelecionadas(files) {
       thumbsEl.innerHTML = "";
+      imagensCarregadas = [];
+      openModalBtn.disabled = true;
       if (!files || files.length === 0) return;
 
       try {
         const imagens = await lerImgs(files);
-        for (const img of imagens) {
+        imagensCarregadas = imagens;
+        imagemSelecionadaIdx = 0;
+        openModalBtn.disabled = imagens.length === 0;
+
+        imagens.forEach((img, idx) => {
           const el = document.createElement("img");
           el.src = img.dataUrl;
           el.alt = img.file.name;
+          el.title = "Clique para ampliar e conferir com os campos";
+          el.addEventListener("click", () => abrirModalImagem(idx));
           thumbsEl.appendChild(el);
-        }
+        });
 
         document.getElementById("clienteInput").value = "";
         document.getElementById("pedidoInput").value = "";
@@ -469,7 +578,7 @@
         if (resultado.aviso) {
           setStatus(`${resultado.aviso}\n\n${resumo}`, true);
         } else {
-          setStatus(`OCR concluído para "${imagens[0].file.name}".\n${resumo}`);
+          setStatus(`OCR concluído para "${imagens[0].file.name}". Clique na imagem para ampliar e comparar.\n${resumo}`);
         }
       } catch (err) {
         setStatus(`Erro ao ler ${files[0]?.name || "imagem"}: ${err.message || "Falha no OCR."}`, true);

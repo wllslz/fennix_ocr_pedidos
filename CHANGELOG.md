@@ -2,6 +2,14 @@
 
 Todas as mudanças notáveis, diagnósticos e etapas do processo deste projeto serão documentadas neste arquivo.
 
+## [1.3.2] - 2026-11-25
+
+### Processo geral e diagnóstico
+- **Inspeção visual ampliada e comparação com os valores extraídos:** adicionou-se modal de visualização ampliada ao clicar na miniatura ou em **Ampliar imagem para conferência**, permitindo comparar diretamente a imagem original com os campos editáveis e aplicar ajustes antes de gravar na aba `BASE `.
+
+### Adicionado
+- Modal de conferência visual da imagem com visualização ampliada e edição sincronizada dos campos (`Código do Cliente`, `Nº Pedido`, `Peso kg` e `Valor R$`).
+
 ## [1.3.1] - 2026-11-25
 
 ### Processo geral e diagnóstico
