@@ -51,7 +51,7 @@
 <body>
   <div class="container">
     <h1>Fennix OCR Pedidos</h1>
-    <p class="sub">Extrai código do cliente, nº do pedido, peso e total via OCR e grava na aba <strong>BASE </strong> preservando XML/estilos.</p>
+    <p class="sub">Preenche a próxima linha ativa da aba <strong>BASE </strong> no formato exato (Data, Mês, Cliente, Peso, Valor, Pedido) mantendo XML e abas intactas.</p>
 
     <div class="grid">
       <div class="card">
@@ -66,21 +66,21 @@
       </div>
 
       <div class="card">
-        <label for="clienteInput">Código do Cliente</label>
+        <label for="clienteInput">Código do Cliente (Col. C)</label>
         <input id="clienteInput" type="text" placeholder="Ex.: 14660" />
 
         <div class="row">
           <div>
-            <label for="pedidoInput">Nº Pedido</label>
+            <label for="pedidoInput">Nº Pedido (Col. F)</label>
             <input id="pedidoInput" type="text" placeholder="Ex.: 4731000665" />
           </div>
           <div>
-            <label for="pesoInput">Peso (kg)</label>
+            <label for="pesoInput">Peso kg (Col. D)</label>
             <input id="pesoInput" type="text" placeholder="Ex.: 20,16" />
           </div>
         </div>
 
-        <label for="totalInput">Total (R$)</label>
+        <label for="totalInput">Valor R$ (Col. E)</label>
         <input id="totalInput" type="text" placeholder="Ex.: 359,89" />
 
         <div style="display:flex; gap:10px; flex-wrap:wrap;">
@@ -96,10 +96,11 @@
         <thead>
           <tr>
             <th>#</th>
+            <th>Linha BASE</th>
             <th>Cód. Cliente</th>
             <th>Pedido</th>
             <th>Peso</th>
-            <th>Total</th>
+            <th>Valor</th>
           </tr>
         </thead>
         <tbody id="tabelaPedidos"></tbody>
@@ -111,6 +112,7 @@
     const TARGET_SHEET_NAME = "BASE ";
     let zipInstance = null;
     let baseSheetPath = null;
+    let sharedStringsList = [];
     let arquivoOriginalNome = "planilha_atualizada.xlsx";
     let pedidosAdicionados = [];
     let ocrWorker = null;
@@ -142,14 +144,6 @@
         .replace(/'/g, "&apos;");
     }
 
-    function colunaParaIndice(colStr) {
-      let n = 0;
-      for (let i = 0; i < colStr.length; i++) {
-        n = n * 26 + (colStr.charCodeAt(i) - 64);
-      }
-      return n;
-    }
-
     function indiceParaColuna(num) {
       let s = "";
       while (num > 0) {
@@ -161,9 +155,19 @@
     }
 
     function normalizarCaminhoZip(target) {
-      const limpo = target.replace(/^\/+/, "");
+      const limpo = String(target || "").replace(/^\/+/, "");
       if (limpo.startsWith("xl/")) return limpo;
       return `xl/${limpo}`;
+    }
+
+    async function carregarSharedStrings(zip) {
+      const ssXml = await zip.file("xl/sharedStrings.xml")?.async("string");
+      if (!ssXml) return [];
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(ssXml, "application/xml");
+      return Array.from(doc.getElementsByTagName("si")).map((si) =>
+        Array.from(si.getElementsByTagName("t")).map((t) => t.textContent || "").join("")
+      );
     }
 
     async function localizarAbaBase(zip) {
@@ -202,6 +206,9 @@
         const buffer = await file.arrayBuffer();
         zipInstance = await JSZip.loadAsync(buffer);
         baseSheetPath = await localizarAbaBase(zipInstance);
+        sharedStringsList = await carregarSharedStrings(zipInstance);
+        pedidosAdicionados = [];
+        render();
         atualizarEstadoDownload();
         setStatus(`Planilha carregada. Aba alvo: ${baseSheetPath}. Adicione pelo menos 1 pedido para liberar o download.`);
       } catch (err) {
@@ -284,7 +291,6 @@
         .replace(/\r/g, "\n")
         .trim();
 
-      // 1) Nº Pedido: prioriza números de 5 a 14 dígitos próximos a "Pedido" ou no topo direito
       let pedido = "";
       const rxPedidoRotulo = /\bPedido\b[^\d\n]{0,18}(\d{5,14})\b/i;
       const mPedidoRotulo = base.match(rxPedidoRotulo);
@@ -300,7 +306,6 @@
         }
       }
 
-      // 2) Código do Cliente: captura o código numérico logo após "Cliente" (ex.: 14660)
       let clienteCodigo = "";
       const rxClienteCod = /\bCliente\b[^\d\n]{0,15}(\d{2,10})\b/i;
       const mClienteCod = base.match(rxClienteCod);
@@ -311,14 +316,12 @@
         clienteCodigo = candidatosCliente[0] || "";
       }
 
-      // 3) Peso (kg)
       let peso = "";
       const mPeso = base.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
       if (mPeso && mPeso[1]) {
         peso = mPeso[1];
       }
 
-      // 4) Total (R$): prioriza o total final da linha de totais / rodapé
       let total = "";
       const mTotalLinha = textoTotais.match(/\bTotal\b[^\d\n]{0,18}(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})/i);
       if (mTotalLinha && mTotalLinha[1]) {
@@ -385,6 +388,7 @@
         const tr = document.createElement("tr");
         tr.innerHTML = `
           <td>${idx + 1}</td>
+          <td>${escapeXml(item.linha)}</td>
           <td>${escapeXml(item.cliente)}</td>
           <td>${escapeXml(item.pedido)}</td>
           <td>${escapeXml(item.peso)}</td>
@@ -424,7 +428,7 @@
           `Cód. Cliente: ${resultado.cliente || "-"}`,
           `Pedido: ${resultado.pedido || "-"}`,
           `Peso: ${resultado.peso || "-"}`,
-          `Total: ${resultado.total || "-"}`,
+          `Valor: ${resultado.total || "-"}`,
           "",
           resultado.textoBruto || ""
         ].join("\n");
@@ -439,38 +443,99 @@
       }
     });
 
-    function criarCelulaXml(ref, valor, estiloIdx) {
-      const styleAttr = estiloIdx ? ` s="${estiloIdx}"` : "";
-      if (valor === "" || valor === null || valor === undefined) {
-        return `<c r="${ref}"${styleAttr}/>`;
+    function parseNumeroFlex(val) {
+      if (val === "" || val === null || val === undefined) return null;
+      let s = String(val).trim().replace(/\s+/g, "");
+      if (!s) return null;
+      if (s.includes(",") && s.includes(".")) {
+        s = s.replace(/\./g, "").replace(",", ".");
+      } else if (s.includes(",")) {
+        s = s.replace(",", ".");
       }
-      const normalizadoNum = String(valor).replace(/\s+/g, "").replace(",", ".");
-      const num = Number(normalizadoNum);
-      if (!Number.isNaN(num) && normalizadoNum !== "" && !/^0\d+/.test(normalizadoNum)) {
-        return `<c r="${ref}"${styleAttr}><v>${num}</v></c>`;
-      }
-      return `<c r="${ref}" t="inlineStr"${styleAttr}><is><t xml:space="preserve">${escapeXml(String(valor))}</t></is></c>`;
+      const n = Number(s);
+      return Number.isNaN(n) ? null : n;
     }
 
-    function atualizarDimensionXml(xmlText, ultimaLinha, ultimaColIdx) {
-      const dimRegex = /<dimension\b([^>]*)\/>/;
-      const match = xmlText.match(dimRegex);
-      if (!match) return xmlText;
+    function criarCelula(ref, estiloIdx, tipo, valorRaw) {
+      const styleAttr = estiloIdx ? ` s="${estiloIdx}"` : "";
+      if (valorRaw === null || valorRaw === undefined || valorRaw === "") {
+        return `<c r="${ref}"${styleAttr}/>`;
+      }
+      if (tipo === "s") {
+        return `<c r="${ref}"${styleAttr} t="s"><v>${escapeXml(valorRaw)}</v></c>`;
+      }
+      if (tipo === "inlineStr") {
+        return `<c r="${ref}"${styleAttr} t="inlineStr"><is><t xml:space="preserve">${escapeXml(valorRaw)}</t></is></c>`;
+      }
+      return `<c r="${ref}"${styleAttr}><v>${escapeXml(valorRaw)}</v></c>`;
+    }
 
-      const attrs = match[1];
-      const refMatch = attrs.match(/ref="([A-Z]+)(\d+):([A-Z]+)(\d+)"/);
-      if (!refMatch) return xmlText;
+    function encontrarProximaLinhaAtiva(sheetXml) {
+      const rowRegex = /<row\b([^>]*)>([\s\S]*?)<\/row>/g;
+      let match;
+      let ultimaLinhaComConteudo = 1;
+      let ultimaRowXml = "";
 
-      const startCol = refMatch[1];
-      const startRow = refMatch[2];
-      const maxColAtual = colunaParaIndice(refMatch[3]);
-      const maxRowAtual = Number(refMatch[4]);
+      while ((match = rowRegex.exec(sheetXml)) !== null) {
+        const attrs = match[1];
+        const inner = match[2];
+        const rMatch = attrs.match(/\br="(\d+)"/);
+        if (!rMatch) continue;
+        const rNum = Number(rMatch[1]);
+        if (rNum <= 1) continue;
 
-      const novaCol = indiceParaColuna(Math.max(maxColAtual, ultimaColIdx));
-      const novaLinha = Math.max(maxRowAtual, ultimaLinha);
-      const novoRef = `${startCol}${startRow}:${novaCol}${novaLinha}`;
+        // Considera linha com conteúdo real se tiver <v> ou <t> com texto (ignora linhas vazias formatadas até 1048504)
+        const temValor = /<(?:v|t)[^>]*>[^<\s][^<]*<\/(?:v|t)>/.test(inner);
+        if (temValor) {
+          ultimaLinhaComConteudo = rNum;
+          ultimaRowXml = match[0];
+        }
+      }
 
-      return xmlText.replace(dimRegex, `<dimension${attrs.replace(/ref="[^"]*"/, `ref="${novoRef}"`)}/>`);
+      return {
+        proximaLinha: ultimaLinhaComConteudo + 1,
+        ultimaRowXml
+      };
+    }
+
+    function extrairEstilosEValoresModelo(ultimaRowXml) {
+      // Padrão base observado na aba BASE (colunas A..L)
+      const estilos = {
+        A: "56", B: "57", C: "57", D: "58", E: "59", F: "60",
+        G: "57", H: "57", I: "57", J: "57", K: "57", L: "57"
+      };
+      let dataSerial = "";
+      let mesSsIdx = "";
+      let statusSsIdx = "";
+
+      if (ultimaRowXml) {
+        const celulas = Array.from(ultimaRowXml.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g));
+        for (const [, attrs, inner] of celulas) {
+          const refM = attrs.match(/\br="([A-Z]+)\d+"/);
+          if (!refM) continue;
+          const col = refM[1];
+          const sM = attrs.match(/\bs="(\d+)"/);
+          if (sM) estilos[col] = sM[1];
+
+          const tM = attrs.match(/\bt="([^"]+)"/);
+          const vM = inner.match(/<v>([^<]+)<\/v>/);
+          if (col === "A" && vM) dataSerial = vM[1].trim();
+          if (col === "B" && tM?.[1] === "s" && vM) mesSsIdx = vM[1].trim();
+          if (col === "I" && tM?.[1] === "s" && vM) statusSsIdx = vM[1].trim();
+        }
+      }
+
+      // Fallback para sharedStrings caso a última linha não tenha mês ou status
+      if (!mesSsIdx) {
+        const idxNov = sharedStringsList.findIndex((txt) => txt.trim().toLowerCase() === "novembro");
+        if (idxNov >= 0) mesSsIdx = String(idxNov);
+      }
+      if (!statusSsIdx) {
+        const idxSep = sharedStringsList.findIndex((txt) => txt.trim().toUpperCase() === "SEPARADO");
+        if (idxSep >= 0) statusSsIdx = String(idxSep);
+      }
+
+      return { estilos, dataSerial, mesSsIdx, statusSsIdx };
     }
 
     async function adicionarNaPlanilha() {
@@ -479,48 +544,82 @@
         return;
       }
 
-      const cliente = document.getElementById("clienteInput").value.trim();
-      const pedido = document.getElementById("pedidoInput").value.trim();
-      const peso = document.getElementById("pesoInput").value.trim();
-      const total = document.getElementById("totalInput").value.trim();
+      const clienteStr = document.getElementById("clienteInput").value.trim();
+      const pedidoStr = document.getElementById("pedidoInput").value.trim();
+      const pesoStr = document.getElementById("pesoInput").value.trim();
+      const totalStr = document.getElementById("totalInput").value.trim();
 
-      if (!cliente && !pedido && !peso && !total) {
+      if (!clienteStr && !pedidoStr && !pesoStr && !totalStr) {
         setStatus("Preencha ao menos um campo antes de adicionar à aba BASE.", true);
         return;
       }
 
       try {
         let sheetXml = await zipInstance.file(baseSheetPath).async("string");
-        const rowMatches = Array.from(sheetXml.matchAll(/<row\b[^>]*r="(\d+)"[^>]*>[\s\S]*?<\/row>/g));
+        const { proximaLinha, ultimaRowXml } = encontrarProximaLinhaAtiva(sheetXml);
+        const { estilos, dataSerial, mesSsIdx, statusSsIdx } = extrairEstilosEValoresModelo(ultimaRowXml);
 
-        let proximaLinha = 2;
-        let estilosReferencia = ["", "", "", ""];
+        const clienteNum = parseNumeroFlex(clienteStr);
+        const pedidoNum = parseNumeroFlex(pedidoStr);
+        const pesoNum = parseNumeroFlex(pesoStr);
+        const totalNum = parseNumeroFlex(totalStr);
 
-        if (rowMatches.length > 0) {
-          const ultimaRowMatch = rowMatches[rowMatches.length - 1];
-          proximaLinha = Number(ultimaRowMatch[1]) + 1;
+        const cA = dataSerial ? criarCelula(`A${proximaLinha}`, estilos.A, "n", dataSerial) : `<c r="A${proximaLinha}" s="${estilos.A}"/>`;
+        const cB = mesSsIdx ? criarCelula(`B${proximaLinha}`, estilos.B, "s", mesSsIdx) : `<c r="B${proximaLinha}" s="${estilos.B}"/>`;
+        const cC = clienteNum !== null
+          ? criarCelula(`C${proximaLinha}`, estilos.C, "n", clienteNum)
+          : (clienteStr ? criarCelula(`C${proximaLinha}`, estilos.C, "inlineStr", clienteStr) : `<c r="C${proximaLinha}" s="${estilos.C}"/>`);
+        const cD = pesoNum !== null
+          ? criarCelula(`D${proximaLinha}`, estilos.D, "n", pesoNum)
+          : (pesoStr ? criarCelula(`D${proximaLinha}`, estilos.D, "inlineStr", pesoStr) : `<c r="D${proximaLinha}" s="${estilos.D}"/>`);
+        const cE = totalNum !== null
+          ? criarCelula(`E${proximaLinha}`, estilos.E, "n", totalNum)
+          : (totalStr ? criarCelula(`E${proximaLinha}`, estilos.E, "inlineStr", totalStr) : `<c r="E${proximaLinha}" s="${estilos.E}"/>`);
+        const cF = pedidoNum !== null
+          ? criarCelula(`F${proximaLinha}`, estilos.F, "n", pedidoNum)
+          : (pedidoStr ? criarCelula(`F${proximaLinha}`, estilos.F, "inlineStr", pedidoStr) : `<c r="F${proximaLinha}" s="${estilos.F}"/>`);
+        const cG = `<c r="G${proximaLinha}" s="${estilos.G}"/>`;
+        const cH = `<c r="H${proximaLinha}" s="${estilos.H}"/>`;
+        const cI = statusSsIdx ? criarCelula(`I${proximaLinha}`, estilos.I, "s", statusSsIdx) : `<c r="I${proximaLinha}" s="${estilos.I}"/>`;
+        const cJ = `<c r="J${proximaLinha}" s="${estilos.J}"/>`;
+        const cK = `<c r="K${proximaLinha}" s="${estilos.K}"/>`;
+        const cL = `<c r="L${proximaLinha}" s="${estilos.L}"/>`;
 
-          const celulasUltima = Array.from(ultimaRowMatch[0].matchAll(/<c\b[^>]*\b(?:s="(\d+)")?[^>]*>/g));
-          estilosReferencia = [0, 1, 2, 3].map((i) => celulasUltima[i]?.[1] || "");
-        }
+        const novaLinhaXml = `<row r="${proximaLinha}" spans="1:12" x14ac:dyDescent="0.25">${cA}${cB}${cC}${cD}${cE}${cF}${cG}${cH}${cI}${cJ}${cK}${cL}</row>`;
 
-        const valores = [cliente, pedido, peso, total];
-        const celulasXml = valores
-          .map((val, idx) => criarCelulaXml(`${indiceParaColuna(idx + 1)}${proximaLinha}`, val, estilosReferencia[idx]))
-          .join("");
-
-        const novaLinhaXml = `<row r="${proximaLinha}">${celulasXml}</row>`;
-
-        if (sheetXml.includes("</sheetData>")) {
-          sheetXml = sheetXml.replace("</sheetData>", `${novaLinhaXml}</sheetData>`);
+        // Se já existir uma linha com o mesmo número exato `proximaLinha`, substitui; senão insere em ordem antes da linha seguinte
+        const linhaExistenteRegex = new RegExp(`<row\\b[^>]*\\br="${proximaLinha}"[^>]*>[\\s\\S]*?<\\/row>`);
+        if (linhaExistenteRegex.test(sheetXml)) {
+          sheetXml = sheetXml.replace(linhaExistenteRegex, novaLinhaXml);
         } else {
-          throw new Error("Tag </sheetData> não encontrada no XML da aba BASE.");
+          const rowScan = /<row\b[^>]*\br="(\d+)"[^>]*>/g;
+          let mScan;
+          let inserted = false;
+          while ((mScan = rowScan.exec(sheetXml)) !== null) {
+            if (Number(mScan[1]) > proximaLinha) {
+              const pos = mScan.index;
+              sheetXml = sheetXml.slice(0, pos) + novaLinhaXml + sheetXml.slice(pos);
+              inserted = true;
+              break;
+            }
+          }
+          if (!inserted) {
+            if (!sheetXml.includes("</sheetData>")) {
+              throw new Error("Tag </sheetData> não encontrada no XML da aba BASE.");
+            }
+            sheetXml = sheetXml.replace("</sheetData>", `${novaLinhaXml}</sheetData>`);
+          }
         }
 
-        sheetXml = atualizarDimensionXml(sheetXml, proximaLinha, 4);
         zipInstance.file(baseSheetPath, sheetXml);
 
-        pedidosAdicionados.push({ cliente, pedido, peso, total });
+        pedidosAdicionados.push({
+          linha: proximaLinha,
+          cliente: clienteStr,
+          pedido: pedidoStr,
+          peso: pesoStr,
+          total: totalStr
+        });
         render();
 
         document.getElementById("clienteInput").value = "";
@@ -528,7 +627,7 @@
         document.getElementById("pesoInput").value = "";
         document.getElementById("totalInput").value = "";
 
-        setStatus(`Linha ${proximaLinha} adicionada à aba "${TARGET_SHEET_NAME}". Botão de download liberado.`);
+        setStatus(`Linha ${proximaLinha} preenchida na aba "${TARGET_SHEET_NAME}" (Col. A: Data, B: Mês, C: Cliente, D: Peso, E: Valor, F: Pedido). Botão de download liberado.`);
       } catch (err) {
         setStatus(err.message || "Erro ao atualizar a aba BASE.", true);
       }
@@ -550,7 +649,7 @@
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1500);
-        setStatus(`Download iniciado: ${arquivoOriginalNome}`);
+        setStatus(`Download iniciado: ${arquivoOriginalNome} (abas LOJA, BASE e BASE 2 preservadas).`);
       } catch (err) {
         setStatus(err.message || "Erro ao gerar o arquivo .xlsx para download.", true);
       }
