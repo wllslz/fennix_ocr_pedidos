@@ -2,6 +2,16 @@
 
 Todas as mudanças notáveis, diagnósticos e etapas do processo deste projeto serão documentadas neste arquivo.
 
+## [1.3.3] - 2026-11-25
+
+### Processo geral e diagnóstico
+- **Remoção do dump de texto bruto na caixa de status:** após verificação da interface em uso, removeu-se a exibição do texto bruto completo do OCR (`textoBruto`) abaixo do resumo na caixa de status, mantendo apenas os 4 campos extraídos (`Cód. Cliente`, `Pedido`, `Peso`, `Valor`).
+- **Correção da leitura decimal de Peso (`9215` → `92,15`):** identificou-se que em resoluções menores o Tesseract omitia a vírgula decimal do campo `Peso` na linha de totais (ex.: `9215` em vez de `92,15`), gravando `9215` na linha `2613`. Adicionou-se `normalizarPesoExtraido` e prioridade explícita para o recorte `totaisPrep` (com escala `4.0`).
+
+### Alterado
+- Caixa de status exibe exclusivamente o resumo limpo (`Cód. Cliente`, `Pedido`, `Peso`, `Valor`) sem o texto bruto do OCR.
+- Normalização automática do campo `Peso` (`normalizarPesoExtraido`) para reinserir a vírgula decimal em sequências de 4 ou 5 dígitos sem separador (ex.: `9215` → `92,15`) e priorizar a região de totais.
+
 ## [1.3.2] - 2026-11-25
 
 ### Processo geral e diagnóstico

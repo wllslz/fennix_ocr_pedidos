@@ -39,7 +39,7 @@
     .status {
       font-size: 0.85rem; padding: 10px 12px; border-radius: 8px;
       background: #0f172a; border: 1px solid var(--border); margin-top: 10px;
-      white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow-y: auto;
+      white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow-y: auto;
     }
     .linha-destaque {
       margin-top: 14px; padding: 12px; border-radius: 10px;
@@ -110,7 +110,7 @@
           </div>
           <div>
             <label for="pesoInput">Peso kg (Col. D)</label>
-            <input id="pesoInput" type="text" placeholder="Ex.: 20,16" />
+            <input id="pesoInput" type="text" placeholder="Ex.: 92,15" />
           </div>
         </div>
 
@@ -399,6 +399,31 @@
       return ocrWorker;
     }
 
+    function normalizarPesoExtraido(rawPeso) {
+      if (!rawPeso) return "";
+      let limpo = String(rawPeso).trim().replace(/\s+/g, "");
+      if (!limpo) return "";
+
+      // Se vier com separador decimal explícito (vírgula ou ponto), padroniza com vírgula
+      if (/[.,]/.test(limpo)) {
+        const partes = limpo.split(/[.,]/);
+        if (partes.length === 2) {
+          return `${partes[0]},${partes[1]}`;
+        }
+        const dec = partes.pop();
+        return `${partes.join("")},${dec}`;
+      }
+
+      // Se o OCR omitiu a vírgula decimal em pesos com 2 casas (ex.: 9215 -> 92,15; 2016 -> 20,16)
+      if (/^\d{4,5}$/.test(limpo)) {
+        const inteiro = limpo.slice(0, -2);
+        const decimal = limpo.slice(-2);
+        return `${inteiro},${decimal}`;
+      }
+
+      return limpo;
+    }
+
     function extrairDadosPedido(textoCompleto, textoTopoDir, textoClienteEsq, textoTotais) {
       const base = `${textoTopoDir}\n${textoClienteEsq}\n${textoTotais}\n${textoCompleto}`
         .replace(/\r/g, "\n")
@@ -429,11 +454,18 @@
         clienteCodigo = candidatosCliente[0] || "";
       }
 
-      let peso = "";
-      const mPeso = base.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
-      if (mPeso && mPeso[1]) {
-        peso = mPeso[1];
+      // Prioriza a linha de totais para evitar capturar "Peso" de descrições de itens
+      let pesoBruto = "";
+      const mPesoTotais = textoTotais.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
+      if (mPesoTotais && mPesoTotais[1]) {
+        pesoBruto = mPesoTotais[1];
+      } else {
+        const mPesoGeral = base.match(/\bPeso\b[^\d\n]{0,15}(\d+(?:[.,]\d{1,3})?)/i);
+        if (mPesoGeral && mPesoGeral[1]) {
+          pesoBruto = mPesoGeral[1];
+        }
       }
+      const peso = normalizarPesoExtraido(pesoBruto);
 
       let total = "";
       const mTotalLinha = textoTotais.match(/\bTotal\b[^\d\n]{0,18}(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2})|\d+[.,]\d{2})/i);
@@ -450,8 +482,7 @@
         cliente: clienteCodigo,
         pedido,
         peso,
-        total,
-        textoBruto: textoCompleto.trim()
+        total
       };
     }
 
@@ -460,7 +491,7 @@
       const fullPrep = criarRecorteProcessado(img, 0, 0, 1, 1, 2.5);
       const topoDirPrep = criarRecorteProcessado(img, 0.55, 0.08, 0.45, 0.25, 3.5);
       const clienteEsqPrep = criarRecorteProcessado(img, 0, 0.14, 0.65, 0.22, 3.5);
-      const totaisPrep = criarRecorteProcessado(img, 0.4, 0.36, 0.6, 0.16, 3.5);
+      const totaisPrep = criarRecorteProcessado(img, 0.4, 0.36, 0.6, 0.16, 4.0);
 
       const worker = await obterWorkerTesseract();
 
@@ -473,7 +504,7 @@
       await worker.setParameters({ tessedit_char_whitelist: "0123456789Cliente- " });
       const clienteEsqRes = await worker.recognize(clienteEsqPrep);
 
-      await worker.setParameters({ tessedit_char_whitelist: "0123456789.,TotalPesoKg " });
+      await worker.setParameters({ tessedit_char_whitelist: "0123456789.,TotalPesoKg: " });
       const totaisRes = await worker.recognize(totaisPrep);
 
       await worker.setParameters({ tessedit_char_whitelist: "" });
@@ -570,9 +601,7 @@
           `Cód. Cliente: ${resultado.cliente || "-"}`,
           `Pedido: ${resultado.pedido || "-"}`,
           `Peso: ${resultado.peso || "-"}`,
-          `Valor: ${resultado.total || "-"}`,
-          "",
-          resultado.textoBruto || ""
+          `Valor: ${resultado.total || "-"}`
         ].join("\n");
 
         if (resultado.aviso) {
@@ -731,7 +760,7 @@
 
       const clienteStr = document.getElementById("clienteInput").value.trim();
       const pedidoStr = document.getElementById("pedidoInput").value.trim();
-      const pesoStr = document.getElementById("pesoInput").value.trim();
+      const pesoStr = normalizarPesoExtraido(document.getElementById("pesoInput").value.trim());
       const totalStr = document.getElementById("totalInput").value.trim();
 
       if (!clienteStr && !pedidoStr && !pesoStr && !totalStr) {
