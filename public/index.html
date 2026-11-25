@@ -392,7 +392,7 @@
       const sh = Math.max(1, Math.floor(img.height * (y1 - y0)));
 
       const desiredScale = targetWidth / Math.max(sw, 1);
-      const scale = Math.max(1.2, Math.min(5.0, desiredScale));
+      const scale = Math.max(1.2, Math.min(6.0, desiredScale));
       const maxDim = 3200;
       const finalScale = Math.min(scale, maxDim / Math.max(sw, sh, 1));
 
@@ -531,16 +531,40 @@
       return s;
     }
 
+    function escolherMelhorPedido(candidatos) {
+      const validos = (candidatos || [])
+        .map((c) => String(c || "").replace(/\D/g, ""))
+        .filter((d) => d.length >= 6 && d.length <= 14);
+      if (validos.length === 0) return "";
+      // Prioriza fortemente números completos (9 a 12 dígitos) sobre fragmentos cortados (6 dígitos)
+      validos.sort((a, b) => {
+        const scoreA = a.length >= 9 && a.length <= 12 ? 100 + a.length : a.length;
+        const scoreB = b.length >= 9 && b.length <= 12 ? 100 + b.length : b.length;
+        return scoreB - scoreA;
+      });
+      return validos[0];
+    }
+
     function detectarBandasDinamicas(ocrData, imgWidth, imgHeight) {
       const words = Array.isArray(ocrData?.words) ? ocrData.words : [];
       let resumoYs = [];
+      let pedidoBox = null;
 
       for (const w of words) {
         const txt = String(w.text || "").trim().toLowerCase();
         const bbox = w.bbox;
         if (!txt || !bbox) continue;
 
+        const xMid = ((bbox.x0 + bbox.x1) / 2) / Math.max(1, imgWidth);
         const yMid = ((bbox.y0 + bbox.y1) / 2) / Math.max(1, imgHeight);
+
+        if (yMid < 0.45 && xMid > 0.35 && /^ped[a-z0-9]{2,4}:?$/.test(txt)) {
+          pedidoBox = {
+            xNorm: bbox.x0 / Math.max(1, imgWidth),
+            yNorm: yMid,
+            hNorm: (bbox.y1 - bbox.y0) / Math.max(1, imgHeight)
+          };
+        }
 
         if (
           /^emitente/.test(txt) ||
@@ -560,7 +584,7 @@
         resumoY = resumoYs[resumoYs.length - 1];
       }
 
-      return { resumoY };
+      return { resumoY, pedidoBox };
     }
 
     function extrairPorGeometria(ocrData, imgWidth, imgHeight, modoTopo = false) {
@@ -591,40 +615,47 @@
         return Math.abs(cand.yMid - anchor.yMid) <= tol && cand.x0 >= anchor.x0 - 4;
       };
 
-      let pedido = "";
+      const candidatosPedido = [];
       let cliente = "";
       let peso = "";
       let total = "";
 
-      // 1. Pedido por âncora
+      // 1. Pedido por âncora: junta blocos numéricos consecutivos na mesma linha (ex: "4491" + "002666")
       const pedidoAnchor = normWords.find((w) => (modoTopo || w.yNorm < 0.45) && /^ped[a-z0-9]{2,4}:?$/.test(w.lower));
       if (pedidoAnchor) {
         const direita = normWords
-          .filter((w) => w !== pedidoAnchor && mesmaLinha(pedidoAnchor, w, 1.25))
+          .filter((w) => w !== pedidoAnchor && mesmaLinha(pedidoAnchor, w, 1.3))
           .sort((a, b) => a.x0 - b.x0);
+
+        let acumulado = "";
         for (const cand of direita) {
+          if (cand.text.includes("/") || cand.text.includes(".") || cand.text.includes("-")) {
+            if (acumulado.length >= 6) break;
+            continue;
+          }
           const digits = cand.text.replace(/\D/g, "");
-          if (digits.length >= 6 && digits.length <= 14 && !cand.text.includes("/") && !cand.text.includes(".")) {
-            pedido = digits;
+          if (digits.length > 0 && digits.length === cand.text.length) {
+            acumulado += digits;
+            if (acumulado.length >= 6 && acumulado.length <= 14) {
+              candidatosPedido.push(acumulado);
+            }
+          } else if (acumulado.length >= 6) {
             break;
           }
         }
       }
 
-      // 1b. Fallback geométrico no topo direito: número puro de 8 a 14 dígitos (não-data, não-CNPJ)
-      if (!pedido) {
-        const candLongos = normWords
-          .filter((w) => {
-            if (!modoTopo && (w.yNorm > 0.35 || w.xNorm < 0.42)) return false;
-            if (w.text.includes("/") || w.text.includes(".") || w.text.includes("-")) return false;
-            const d = w.text.replace(/\D/g, "");
-            return d.length >= 8 && d.length <= 14;
-          })
-          .sort((a, b) => a.yMid - b.yMid);
-        if (candLongos.length > 0) {
-          pedido = candLongos[0].text.replace(/\D/g, "");
+      // 1b. Sequência numérica longa (8..14 dígitos) no topo direito
+      for (const w of normWords) {
+        if (!modoTopo && (w.yNorm > 0.35 || w.xNorm < 0.40)) continue;
+        if (w.text.includes("/") || w.text.includes(".") || w.text.includes("-")) continue;
+        const d = w.text.replace(/\D/g, "");
+        if (d.length >= 8 && d.length <= 14) {
+          candidatosPedido.push(d);
         }
       }
+
+      const pedido = escolherMelhorPedido(candidatosPedido);
 
       // 2. Cliente
       const clienteAnchor = normWords.find((w) => w.yNorm < 0.55 && /^clien[a-z0-9]{1,3}:?$/.test(w.lower));
@@ -676,26 +707,19 @@
 
     function extrairPorTexto(textoCompleto, textoTopoDir, textoResumo) {
       const combinado = `${textoTopoDir}\n${textoResumo}\n${textoCompleto}`.replace(/\r/g, "\n");
+      const candidatosPedido = [];
 
-      // 1. Pedido
-      let pedido = "";
-      const mPedidoTopo = textoTopoDir.match(/Ped[a-z0-9]{2,4}[^\d\n]{0,20}(\d{6,14})\b/i);
-      if (mPedidoTopo?.[1]) {
-        pedido = mPedidoTopo[1];
-      } else {
-        const longosTopo = Array.from(textoTopoDir.matchAll(/\b(\d{8,14})\b/g)).map((m) => m[1]);
-        if (longosTopo.length > 0) {
-          pedido = longosTopo[0];
-        } else {
-          const mPedidoGeral = combinado.match(/Ped[a-z0-9]{2,4}[^\d\n]{0,20}(\d{6,14})\b/i);
-          if (mPedidoGeral?.[1]) {
-            pedido = mPedidoGeral[1];
-          } else {
-            const longosGeral = Array.from(combinado.matchAll(/\b(\d{8,14})\b/g)).map((m) => m[1]);
-            pedido = longosGeral[0] || "";
-          }
+      // Captura Pedido mesmo se houver espaço interno entre grupos de dígitos (ex: "Pedido 4491 002666")
+      for (const fonte of [textoTopoDir, combinado]) {
+        const mRotulo = fonte.match(/Ped[a-z0-9]{2,4}[^\d\n]{0,20}((?:\d[\t ]*){6,14})\b/i);
+        if (mRotulo?.[1]) {
+          candidatosPedido.push(mRotulo[1].replace(/\D/g, ""));
+        }
+        for (const mLong of fonte.matchAll(/\b(\d{8,14})\b/g)) {
+          candidatosPedido.push(mLong[1]);
         }
       }
+      const pedido = escolherMelhorPedido(candidatosPedido);
 
       // 2. Cliente
       let cliente = "";
@@ -774,11 +798,22 @@
       const geoFull = extrairPorGeometria(fullRes.data, fullPrep.width, fullPrep.height, false);
       const bandas = detectarBandasDinamicas(fullRes.data, fullPrep.width, fullPrep.height);
 
-      // Passada 2: Recorte amplo do canto superior direito (sem whitelist rígida para preservar quebras de linha)
+      // Passada 2: Recorte cirúrgico na linha do Pedido (PSM 7 linha única) ou bloco superior direito
       etapaOcrBasePct = 40;
       etapaOcrFaixaPct = 30;
-      const topoDirPrep = criarRecorteAdaptativo(img, 0.35, 0.0, 0.65, 0.36, 2600, 28, 0.50);
-      await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "11" });
+      let topoDirPrep;
+      let topoPsm = "6";
+      if (bandas.pedidoBox) {
+        const rx = Math.max(0.35, bandas.pedidoBox.xNorm - 0.03);
+        const ry = Math.max(0, bandas.pedidoBox.yNorm - Math.max(0.028, bandas.pedidoBox.hNorm * 1.4));
+        const rh = Math.max(0.06, bandas.pedidoBox.hNorm * 2.8);
+        topoDirPrep = criarRecorteAdaptativo(img, rx, ry, 1.0 - rx, rh, 2200, 28, 0.45);
+        topoPsm = "7";
+      } else {
+        topoDirPrep = criarRecorteAdaptativo(img, 0.40, 0.04, 0.60, 0.28, 2600, 28, 0.45);
+        topoPsm = "6";
+      }
+      await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: topoPsm });
       const topoDirRes = await worker.recognize(topoDirPrep.dataUrl);
       const geoTopo = extrairPorGeometria(topoDirRes.data, topoDirPrep.width, topoDirPrep.height, true);
 
@@ -801,9 +836,15 @@
         resumoRes.data?.text || ""
       );
 
+      const melhorPedido = escolherMelhorPedido([
+        geoTopo.pedido,
+        geoFull.pedido,
+        txtMerged.pedido
+      ]);
+
       const resultado = {
         cliente: geoFull.cliente || txtMerged.cliente || "",
-        pedido: geoTopo.pedido || geoFull.pedido || txtMerged.pedido || "",
+        pedido: melhorPedido,
         peso: geoResumo.peso || geoFull.peso || txtMerged.peso || "",
         total: geoResumo.total || geoFull.total || txtMerged.total || ""
       };
