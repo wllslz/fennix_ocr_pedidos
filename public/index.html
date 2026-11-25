@@ -3,258 +3,224 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Fennix OCR Pedidos</title>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <title>Fennix OCR Pedidos — Editor BASE</title>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f172a;
-      color: #e2e8f0;
-      padding: 24px;
-      line-height: 1.5;
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --border: #334155;
+      --ok: #22c55e;
+      --err: #ef4444;
     }
-    .container {
-      max-width: 1080px;
-      margin: 0 auto;
-      display: grid;
-      gap: 20px;
+    * { box-sizing: border-box; font-family: system-ui, -apple-system, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--text); padding: 24px; }
+    .container { max-width: 1120px; margin: 0 auto; }
+    h1 { margin: 0 0 8px; font-size: 1.5rem; }
+    p.sub { margin: 0 0 20px; color: var(--muted); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+    label { display: block; font-size: 0.85rem; color: var(--muted); margin-bottom: 6px; }
+    input[type="file"], input[type="text"], input[type="number"] {
+      width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border);
+      background: #0f172a; color: var(--text); margin-bottom: 12px;
     }
-    .card {
-      background: #1e293b;
-      border: 1px solid #334155;
-      border-radius: 12px;
-      padding: 20px;
-    }
-    h1 { font-size: 1.5rem; margin-bottom: 6px; color: #f8fafc; }
-    h2 { font-size: 1.1rem; margin-bottom: 12px; color: #cbd5e1; }
-    p.muted { color: #94a3b8; font-size: 0.92rem; }
-    .grid-2 {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 16px;
-    }
-    .dropzone {
-      border: 2px dashed #475569;
-      border-radius: 10px;
-      padding: 24px;
-      text-align: center;
-      background: #0f172a;
-      cursor: pointer;
-      transition: border-color 0.2s, background 0.2s;
-    }
-    .dropzone:hover, .dropzone.dragover {
-      border-color: #38bdf8;
-      background: #17255433;
-    }
-    label { display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 6px; }
-    input[type="text"], input[type="number"], input[type="file"], select {
-      width: 100%;
-      padding: 9px 12px;
-      border-radius: 8px;
-      border: 1px solid #475569;
-      background: #0f172a;
-      color: #f8fafc;
-      font-size: 0.95rem;
-    }
-    .btn-row { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+    .row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
     button {
-      padding: 10px 16px;
-      border-radius: 8px;
-      border: none;
-      font-weight: 600;
-      cursor: pointer;
-      font-size: 0.92rem;
+      background: var(--accent); color: #0f172a; border: none; border-radius: 8px;
+      padding: 10px 14px; font-weight: 600; cursor: pointer;
     }
-    .btn-primary { background: #0284c7; color: #fff; }
-    .btn-primary:hover { background: #0369a1; }
-    .btn-success { background: #16a34a; color: #fff; }
-    .btn-success:hover { background: #15803d; }
-    .btn-secondary { background: #334155; color: #f8fafc; }
-    .btn-secondary:hover { background: #475569; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+    button.secondary { background: #334155; color: var(--text); }
     .status {
-      margin-top: 10px;
-      font-size: 0.9rem;
-      color: #38bdf8;
-      min-height: 20px;
+      font-size: 0.85rem; padding: 10px 12px; border-radius: 8px;
+      background: #0f172a; border: 1px solid var(--border); margin-top: 10px;
+      white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow-y: auto;
     }
-    .preview-box {
-      display: grid;
-      gap: 12px;
-      align-items: start;
+    .linha-destaque {
+      margin-top: 14px; padding: 12px; border-radius: 10px;
+      background: #0f172a; border: 1px solid var(--border); font-size: 0.88rem;
     }
-    .preview-box img, .preview-box canvas {
-      max-width: 100%;
-      max-height: 320px;
-      border-radius: 8px;
-      border: 1px solid #334155;
-      background: #090d16;
+    .linha-destaque strong { color: var(--accent); }
+    .celulas-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 8px; margin-top: 10px; font-size: 0.82rem;
     }
-    pre {
-      background: #090d16;
-      border: 1px solid #334155;
-      border-radius: 8px;
-      padding: 12px;
-      font-size: 0.82rem;
-      overflow-x: auto;
-      max-height: 220px;
-      color: #cbd5e1;
-      white-space: pre-wrap;
+    .celula-box {
+      background: #1e293b; border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
     }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 12px;
-      font-size: 0.88rem;
+    .thumbs { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    .thumbs img {
+      width: 120px; height: 90px; object-fit: contain; background: #0f172a;
+      border-radius: 8px; border: 1px solid var(--border); cursor: pointer;
     }
-    th, td {
-      border: 1px solid #334155;
-      padding: 8px 10px;
-      text-align: left;
+    .thumbs img:hover { border-color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.9rem; }
+    th, td { border-bottom: 1px solid var(--border); padding: 8px; text-align: left; }
+    th { color: var(--muted); }
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(2, 6, 23, 0.86);
+      display: none; align-items: center; justify-content: center; padding: 20px; z-index: 50;
     }
-    th { background: #0f172a; color: #93c5fd; }
-    .badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-size: 0.78rem;
-      background: #1e3a8a;
-      color: #bfdbfe;
+    .modal-backdrop.open { display: flex; }
+    .modal-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      max-width: 1120px; width: 100%; max-height: 92vh; overflow: auto; padding: 16px;
     }
+    .modal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+    .modal-body { display: grid; grid-template-columns: minmax(320px, 1.4fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+    .modal-img-wrap { background: #0f172a; border: 1px solid var(--border); border-radius: 8px; padding: 8px; overflow: auto; max-height: 75vh; }
+    .modal-img-wrap img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
+    @media (max-width: 780px) { .modal-body { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="card">
-      <h1>Fennix OCR Pedidos</h1>
-      <p class="muted">
-        Extraia dados de prints de pedidos via OCR (suporte a upload, arrastar e soltar ou <code>Ctrl + V</code>) e insira na aba <strong>BASE</strong> do arquivo <code>.xlsx</code> preservando formatação.
-      </p>
-    </div>
+    <h1>Fennix OCR Pedidos</h1>
+    <p class="sub">Preenche a próxima linha ativa da aba <strong>BASE</strong> no formato exato (colunas A a M) mantendo XML e abas intactas. Suporta seleção, <strong>Ctrl + V</strong> e inspeção ampliada da imagem.</p>
 
-    <div class="card grid-2">
-      <div>
-        <h2>1. Planilha Base (.xlsx)</h2>
-        <label for="xlsxInput">Selecionar arquivo .xlsx</label>
+    <div class="grid">
+      <div class="card">
+        <label for="xlsxInput">1. Planilha base (.xlsx)</label>
         <input id="xlsxInput" type="file" accept=".xlsx" />
-        <div id="xlsxInfo" class="status">Nenhuma planilha carregada.</div>
-        <div class="btn-row">
-          <button id="downloadXlsxBtn" class="btn-success" disabled>Baixar .xlsx Atualizado</button>
+
+        <label for="imgInput">2. Prints / imagens de pedidos (ou cole com Ctrl + V)</label>
+        <input id="imgInput" type="file" accept="image/*" multiple />
+
+        <div style="margin-bottom:8px;">
+          <button id="openModalBtn" type="button" class="secondary" disabled>Ampliar imagem para conferência</button>
         </div>
+
+        <div class="thumbs" id="thumbs"></div>
+        <div class="status" id="statusBox">Aguardando seleção da planilha (.xlsx) e das imagens (ou Ctrl + V).</div>
       </div>
 
-      <div>
-        <h2>2. Imagem / Print do Pedido</h2>
-        <div id="dropzone" class="dropzone" tabindex="0">
-          Clique para escolher uma imagem, arraste aqui ou pressione <strong>Ctrl + V</strong>
-        </div>
-        <input id="imgInput" type="file" accept="image/*" style="display:none" />
-        <div class="btn-row">
-          <button id="runOcrBtn" class="btn-primary" disabled>Executar OCR</button>
-          <button id="clearImgBtn" class="btn-secondary">Limpar</button>
-        </div>
-        <div id="ocrStatus" class="status"></div>
-      </div>
-    </div>
+      <div class="card">
+        <label for="clienteInput">Código do Cliente (Col. C)</label>
+        <input id="clienteInput" type="text" placeholder="Ex.: 13960" />
 
-    <div class="card grid-2">
-      <div class="preview-box">
-        <h2>Pré-visualização &amp; Processamento</h2>
-        <img id="imgPreview" alt="Pré-visualização da imagem" style="display:none" />
-        <canvas id="ocrCanvas" style="display:none"></canvas>
-        <div>
-          <label>Texto bruto reconhecido (OCR)</label>
-          <pre id="rawOcrText">Aguardando processamento...</pre>
+        <div class="row">
+          <div>
+            <label for="pedidoInput">Nº Pedido (Col. F)</label>
+            <input id="pedidoInput" type="text" placeholder="Ex.: 4651000815" />
+          </div>
+          <div>
+            <label for="pesoInput">Peso kg (Col. D)</label>
+            <input id="pesoInput" type="text" placeholder="Ex.: 23,10" />
+          </div>
         </div>
-      </div>
 
-      <div>
-        <h2>3. Conferência dos Campos Extraídos</h2>
-        <div class="grid-2">
-          <div>
-            <label for="codigoCliente">Código do Cliente</label>
-            <input id="codigoCliente" type="text" placeholder="Ex.: 10452" />
-          </div>
-          <div>
-            <label for="numeroPedido">Nº Pedido</label>
-            <input id="numeroPedido" type="text" placeholder="Ex.: 884120" />
-          </div>
-          <div>
-            <label for="pesoKg">Peso (kg)</label>
-            <input id="pesoKg" type="text" placeholder="Ex.: 12,50" />
-          </div>
-          <div>
-            <label for="valorReais">Valor (R$)</label>
-            <input id="valorReais" type="text" placeholder="Ex.: 1.250,90" />
-          </div>
+        <label for="totalInput">Valor R$ (Col. E)</label>
+        <input id="totalInput" type="text" placeholder="Ex.: 467,08" />
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+          <button id="addBtn" type="button">Adicionar à BASE</button>
+          <button id="downloadBtn" type="button" class="secondary" disabled>Baixar .xlsx atualizado</button>
         </div>
-        <div class="btn-row">
-          <button id="addRowBtn" class="btn-primary" disabled>Adicionar na Aba BASE</button>
+
+        <div class="linha-destaque" id="ultimaLinhaBox">
+          <div><strong>Linha preenchida na aba BASE:</strong> <span id="linhaNumeroLabel">Nenhuma linha gravada ainda</span></div>
+          <div class="celulas-grid" id="linhaCelulasGrid"></div>
         </div>
-        <div id="rowStatus" class="status"></div>
       </div>
     </div>
 
     <div class="card">
-      <h2>Itens Adicionados Nesta Sessão <span id="itemCount" class="badge">0</span></h2>
+      <strong>Pedidos adicionados nesta sessão</strong>
       <table>
         <thead>
           <tr>
             <th>#</th>
             <th>Linha BASE</th>
-            <th>Código Cliente</th>
-            <th>Nº Pedido</th>
-            <th>Peso (kg)</th>
-            <th>Valor (R$)</th>
+            <th>Cód. Cliente</th>
+            <th>Pedido</th>
+            <th>Peso</th>
+            <th>Valor</th>
+            <th>Col. M</th>
           </tr>
         </thead>
-        <tbody id="addedTableBody"></tbody>
+        <tbody id="tabelaPedidos"></tbody>
       </table>
     </div>
   </div>
 
+  <div class="modal-backdrop" id="imgModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="modal-card">
+      <div class="modal-head">
+        <strong id="modalTitle">Conferência visual da imagem</strong>
+        <button id="closeModalBtn" type="button" class="secondary">Fechar (Esc)</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-img-wrap">
+          <img id="modalImg" src="" alt="Imagem ampliada do pedido" />
+        </div>
+        <div>
+          <label for="modalCliente">Código do Cliente (Col. C)</label>
+          <input id="modalCliente" type="text" />
+
+          <label for="modalPedido">Nº Pedido (Col. F)</label>
+          <input id="modalPedido" type="text" />
+
+          <label for="modalPeso">Peso kg (Col. D)</label>
+          <input id="modalPeso" type="text" />
+
+          <label for="modalTotal">Valor R$ (Col. E)</label>
+          <input id="modalTotal" type="text" />
+
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button id="applyModalBtn" type="button">Aplicar valores nos campos</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
-    const state = {
-      zip: null,
-      workbookXmlPath: null,
-      workbookXml: null,
-      relsXml: null,
-      baseSheetPath: null,
-      baseSheetXml: null,
-      sharedStringsXml: null,
-      sharedStrings: [],
-      nextRowNumber: null,
-      sessionRows: []
-    };
+    let zipInstance = null;
+    let baseSheetPath = null;
+    let nomeAbaEncontrada = "BASE";
+    let sharedStringsList = [];
+    let arquivoOriginalNome = "planilha_atualizada.xlsx";
+    let pedidosAdicionados = [];
+    let ocrWorker = null;
+    let etapaOcrBasePct = 0;
+    let etapaOcrFaixaPct = 34;
+    let imagensCarregadas = [];
+    let imagemSelecionadaIdx = 0;
 
     const xlsxInput = document.getElementById("xlsxInput");
-    const xlsxInfo = document.getElementById("xlsxInfo");
-    const downloadXlsxBtn = document.getElementById("downloadXlsxBtn");
-
-    const dropzone = document.getElementById("dropzone");
     const imgInput = document.getElementById("imgInput");
-    const runOcrBtn = document.getElementById("runOcrBtn");
-    const clearImgBtn = document.getElementById("clearImgBtn");
-    const ocrStatus = document.getElementById("ocrStatus");
-    const imgPreview = document.getElementById("imgPreview");
-    const ocrCanvas = document.getElementById("ocrCanvas");
-    const rawOcrText = document.getElementById("rawOcrText");
+    const openModalBtn = document.getElementById("openModalBtn");
+    const thumbsEl = document.getElementById("thumbs");
+    const statusBox = document.getElementById("statusBox");
+    const addBtn = document.getElementById("addBtn");
+    const downloadBtn = document.getElementById("downloadBtn");
+    const tabelaPedidos = document.getElementById("tabelaPedidos");
+    const linhaNumeroLabel = document.getElementById("linhaNumeroLabel");
+    const linhaCelulasGrid = document.getElementById("linhaCelulasGrid");
 
-    const codigoClienteEl = document.getElementById("codigoCliente");
-    const numeroPedidoEl = document.getElementById("numeroPedido");
-    const pesoKgEl = document.getElementById("pesoKg");
-    const valorReaisEl = document.getElementById("valorReais");
-    const addRowBtn = document.getElementById("addRowBtn");
-    const rowStatus = document.getElementById("rowStatus");
-    const itemCountEl = document.getElementById("itemCount");
-    const addedTableBody = document.getElementById("addedTableBody");
+    const imgModal = document.getElementById("imgModal");
+    const closeModalBtn = document.getElementById("closeModalBtn");
+    const modalImg = document.getElementById("modalImg");
+    const modalTitle = document.getElementById("modalTitle");
+    const modalCliente = document.getElementById("modalCliente");
+    const modalPedido = document.getElementById("modalPedido");
+    const modalPeso = document.getElementById("modalPeso");
+    const modalTotal = document.getElementById("modalTotal");
+    const applyModalBtn = document.getElementById("applyModalBtn");
 
-    const COL_LETTERS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"];
+    function atualizarEstadoDownload() {
+      downloadBtn.disabled = !(zipInstance && baseSheetPath && pedidosAdicionados.length > 0);
+    }
 
-    function normalizeHeaderName(name) {
-      return (name || "").replace(/\s+/g, "").toUpperCase();
+    function setStatus(msg, isError = false) {
+      statusBox.textContent = msg;
+      statusBox.style.borderColor = isError ? "var(--err)" : "var(--border)";
+      statusBox.style.color = isError ? "#fca5a5" : "var(--text)";
     }
 
     function escapeXml(str) {
@@ -266,444 +232,792 @@
         .replace(/'/g, "&apos;");
     }
 
-    function parseNumberPtBr(val) {
-      if (val === null || val === undefined) return NaN;
-      const cleaned = String(val)
-        .replace(/R\$/gi, "")
-        .replace(/kg/gi, "")
-        .replace(/\s+/g, "")
-        .trim();
-      if (!cleaned) return NaN;
-      if (cleaned.includes(",") && cleaned.includes(".")) {
-        return Number(cleaned.replace(/\./g, "").replace(",", "."));
-      }
-      if (cleaned.includes(",")) {
-        return Number(cleaned.replace(",", "."));
-      }
-      return Number(cleaned);
+    function normalizarCaminhoZip(target) {
+      const limpo = String(target || "").replace(/^\/+/, "");
+      if (limpo.startsWith("xl/")) return limpo;
+      return `xl/${limpo}`;
     }
 
-    function resolveTargetPath(baseDir, target) {
-      const cleanTarget = target.replace(/^\/+/, "");
-      if (cleanTarget.startsWith("xl/")) return cleanTarget;
-      const parts = (baseDir + "/" + cleanTarget).split("/").filter(Boolean);
-      const stack = [];
-      for (const part of parts) {
-        if (part === ".") continue;
-        if (part === "..") stack.pop();
-        else stack.push(part);
-      }
-      return stack.join("/");
+    function normalizarNomeAba(nome) {
+      return String(nome || "").replace(/\s+/g, " ").trim().toLowerCase();
     }
 
-    function loadSharedStrings(xmlDoc) {
-      state.sharedStrings = [];
-      if (!xmlDoc) return;
-      const sis = Array.from(xmlDoc.getElementsByTagName("si"));
-      for (const si of sis) {
-        const ts = Array.from(si.getElementsByTagName("t"));
-        state.sharedStrings.push(ts.map((t) => t.textContent || "").join(""));
-      }
+    async function carregarSharedStrings(zip) {
+      const ssXml = await zip.file("xl/sharedStrings.xml")?.async("string");
+      if (!ssXml) return [];
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(ssXml, "application/xml");
+      return Array.from(doc.getElementsByTagName("si")).map((si) =>
+        Array.from(si.getElementsByTagName("t")).map((t) => t.textContent || "").join("")
+      );
     }
 
-    function getOrCreateSharedStringIndex(text) {
-      const str = String(text ?? "");
-      const existingIndex = state.sharedStrings.indexOf(str);
-      if (existingIndex !== -1) return existingIndex;
+    async function localizarAbaBase(zip) {
+      const workbookXml = await zip.file("xl/workbook.xml")?.async("string");
+      const relsXml = await zip.file("xl/_rels/workbook.xml.rels")?.async("string");
+      if (!workbookXml || !relsXml) {
+        throw new Error("Estrutura XML do workbook não encontrada no arquivo .xlsx.");
+      }
 
-      state.sharedStrings.push(str);
-      const newIndex = state.sharedStrings.length - 1;
+      const parser = new DOMParser();
+      const wbDoc = parser.parseFromString(workbookXml, "application/xml");
+      const relsDoc = parser.parseFromString(relsXml, "application/xml");
 
-      if (!state.sharedStringsXml) {
-        const parser = new DOMParser();
-        state.sharedStringsXml = parser.parseFromString(
-          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="0" uniqueCount="0"></sst>',
-          "application/xml"
+      const sheets = Array.from(wbDoc.getElementsByTagName("sheet"));
+      const nomesDisponiveis = sheets.map((s) => s.getAttribute("name") || "");
+
+      let abaAlvo = sheets.find((s) => normalizarNomeAba(s.getAttribute("name")) === "base");
+      if (!abaAlvo) {
+        abaAlvo = sheets.find((s) => {
+          const n = normalizarNomeAba(s.getAttribute("name"));
+          return n.startsWith("base") && !n.includes("2");
+        });
+      }
+
+      if (!abaAlvo) {
+        throw new Error(
+          `Aba "BASE" não foi encontrada na planilha. Abas disponíveis: ${nomesDisponiveis.join(", ") || "nenhuma"}.`
         );
       }
 
-      const sst = state.sharedStringsXml.getElementsByTagName("sst")[0];
-      const si = state.sharedStringsXml.createElementNS("http://schemas.openxmlformats.org/spreadsheetml/2006/main", "si");
-      const t = state.sharedStringsXml.createElementNS("http://schemas.openxmlformats.org/spreadsheetml/2006/main", "t");
-      if (/^\s|\s$/.test(str)) {
-        t.setAttribute("xml:space", "preserve");
+      const rId = abaAlvo.getAttribute("r:id");
+      const relationships = Array.from(relsDoc.getElementsByTagName("Relationship"));
+      const rel = relationships.find((r) => r.getAttribute("Id") === rId);
+      if (!rel) {
+        throw new Error("Relacionamento da aba BASE não encontrado em workbook.xml.rels.");
       }
-      t.textContent = str;
-      si.appendChild(t);
-      sst.appendChild(si);
-      sst.setAttribute("count", String(state.sharedStrings.length));
-      sst.setAttribute("uniqueCount", String(state.sharedStrings.length));
 
-      return newIndex;
-    }
-
-    function getCellTextValue(cellEl) {
-      const typeAttr = cellEl.getAttribute("t");
-      if (typeAttr === "s") {
-        const vEl = cellEl.getElementsByTagName("v")[0];
-        const idx = vEl ? parseInt(vEl.textContent, 10) : NaN;
-        return Number.isInteger(idx) && state.sharedStrings[idx] !== undefined
-          ? state.sharedStrings[idx]
-          : "";
-      }
-      if (typeAttr === "inlineStr") {
-        const ts = Array.from(cellEl.getElementsByTagName("t"));
-        return ts.map((t) => t.textContent || "").join("");
-      }
-      const vEl = cellEl.getElementsByTagName("v")[0];
-      return vEl ? (vEl.textContent || "").trim() : "";
-    }
-
-    function findNextActiveRow(sheetDoc) {
-      const rows = Array.from(sheetDoc.getElementsByTagName("row"));
-      let lastNonEmptyRow = 1;
-      for (const row of rows) {
-        const rNum = parseInt(row.getAttribute("r"), 10);
-        if (!Number.isInteger(rNum) || rNum <= 1) continue;
-        const cells = Array.from(row.getElementsByTagName("c"));
-        const hasContent = cells.some((c) => getCellTextValue(c) !== "");
-        if (hasContent && rNum > lastNonEmptyRow) {
-          lastNonEmptyRow = rNum;
-        }
-      }
-      return lastNonEmptyRow + 1;
-    }
-
-    function getTemplateRowStyleMap(sheetDoc, targetRowNum) {
-      const rows = Array.from(sheetDoc.getElementsByTagName("row"));
-      let candidateRow = null;
-      for (const row of rows) {
-        const rNum = parseInt(row.getAttribute("r"), 10);
-        if (rNum === targetRowNum) {
-          candidateRow = row;
-          break;
-        }
-        if (rNum > 1 && (!candidateRow || Math.abs(rNum - targetRowNum) < Math.abs(parseInt(candidateRow.getAttribute("r"), 10) - targetRowNum))) {
-          candidateRow = row;
-        }
-      }
-      const styleMap = {};
-      for (const letter of COL_LETTERS) styleMap[letter] = null;
-      if (!candidateRow) return styleMap;
-
-      const cells = Array.from(candidateRow.getElementsByTagName("c"));
-      for (const cell of cells) {
-        const ref = cell.getAttribute("r") || "";
-        const colMatch = ref.match(/^[A-Z]+/);
-        if (colMatch && COL_LETTERS.includes(colMatch[0])) {
-          styleMap[colMatch[0]] = cell.getAttribute("s");
-        }
-      }
-      return styleMap;
+      return {
+        sheetPath: normalizarCaminhoZip(rel.getAttribute("Target")),
+        sheetName: abaAlvo.getAttribute("name") || "BASE"
+      };
     }
 
     xlsxInput.addEventListener("change", async (e) => {
       const file = e.target.files?.[0];
       if (!file) return;
+
       try {
-        xlsxInfo.textContent = "Lendo planilha...";
-        const arrayBuffer = await file.arrayBuffer();
-        const zip = await JSZip.loadAsync(arrayBuffer);
-        const parser = new DOMParser();
-
-        const workbookXmlStr = await zip.file("xl/workbook.xml")?.async("string");
-        const workbookRelsStr = await zip.file("xl/_rels/workbook.xml.rels")?.async("string");
-        if (!workbookXmlStr || !workbookRelsStr) {
-          throw new Error("Estrutura XML do workbook não encontrada.");
-        }
-
-        const workbookDoc = parser.parseFromString(workbookXmlStr, "application/xml");
-        const relsDoc = parser.parseFromString(workbookRelsStr, "application/xml");
-
-        const relMap = {};
-        for (const rel of Array.from(relsDoc.getElementsByTagName("Relationship"))) {
-          relMap[rel.getAttribute("Id")] = rel.getAttribute("Target");
-        }
-
-        let baseTarget = null;
-        for (const sheet of Array.from(workbookDoc.getElementsByTagName("sheet"))) {
-          const sheetName = sheet.getAttribute("name") || "";
-          const norm = normalizeHeaderName(sheetName);
-          if (norm === "BASE") {
-            const rId = sheet.getAttribute("r:id") || sheet.getAttribute("id");
-            baseTarget = relMap[rId];
-            break;
-          }
-        }
-
-        if (!baseTarget) {
-          throw new Error("Aba BASE não encontrada no arquivo .xlsx.");
-        }
-
-        const baseSheetPath = resolveTargetPath("xl", baseTarget);
-        const baseSheetStr = await zip.file(baseSheetPath)?.async("string");
-        if (!baseSheetStr) {
-          throw new Error(`XML da aba BASE não localizado em ${baseSheetPath}.`);
-        }
-
-        const sharedStr = await zip.file("xl/sharedStrings.xml")?.async("string");
-        const sharedDoc = sharedStr ? parser.parseFromString(sharedStr, "application/xml") : null;
-
-        state.zip = zip;
-        state.workbookXmlPath = "xl/workbook.xml";
-        state.workbookXml = workbookDoc;
-        state.baseSheetPath = baseSheetPath;
-        state.baseSheetXml = parser.parseFromString(baseSheetStr, "application/xml");
-        state.sharedStringsXml = sharedDoc;
-        loadSharedStrings(sharedDoc);
-        state.nextRowNumber = findNextActiveRow(state.baseSheetXml);
-        state.sessionRows = [];
-        addedTableBody.innerHTML = "";
-        itemCountEl.textContent = "0";
-
-        downloadXlsxBtn.disabled = false;
-        addRowBtn.disabled = false;
-        xlsxInfo.textContent = `Aba BASE carregada (${baseSheetPath}). Próxima linha ativa: ${state.nextRowNumber}.`;
+        arquivoOriginalNome = file.name.replace(/\.xlsx$/i, "") + "_atualizado.xlsx";
+        const buffer = await file.arrayBuffer();
+        zipInstance = await JSZip.loadAsync(buffer);
+        const infoAba = await localizarAbaBase(zipInstance);
+        baseSheetPath = infoAba.sheetPath;
+        nomeAbaEncontrada = infoAba.sheetName;
+        sharedStringsList = await carregarSharedStrings(zipInstance);
+        pedidosAdicionados = [];
+        linhaNumeroLabel.textContent = "Nenhuma linha gravada ainda";
+        linhaCelulasGrid.innerHTML = "";
+        render();
+        atualizarEstadoDownload();
+        setStatus(
+          `Planilha carregada. Aba detectada: "${nomeAbaEncontrada}" (${baseSheetPath}, colunas A..M). Adicione pelo menos 1 pedido para liberar o download.`
+        );
       } catch (err) {
-        xlsxInfo.textContent = `Erro: ${err.message}`;
-        downloadXlsxBtn.disabled = true;
+        zipInstance = null;
+        baseSheetPath = null;
+        atualizarEstadoDownload();
+        setStatus(err.message || "Falha ao ler o arquivo .xlsx.", true);
       }
     });
 
-    function preprocessImageToCanvas(imgElement) {
-      const scale = Math.max(1.5, Math.min(3, 1800 / Math.max(imgElement.naturalWidth || 1, 1)));
-      const pad = 24;
-      const w = Math.round((imgElement.naturalWidth || 400) * scale);
-      const h = Math.round((imgElement.naturalHeight || 300) * scale);
-
-      ocrCanvas.width = w + pad * 2;
-      ocrCanvas.height = h + pad * 2;
-      ocrCanvas.style.display = "block";
-
-      const ctx = ocrCanvas.getContext("2d");
-      ctx.fillStyle = "#ffffff";
-      ctx.fillRect(0, 0, ocrCanvas.width, ocrCanvas.height);
-      ctx.drawImage(imgElement, pad, pad, w, h);
-
-      const imgData = ctx.getImageData(pad, pad, w, h);
-      const data = imgData.data;
-
-      for (let i = 0; i < data.length; i += 4) {
-        const gray = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
-        const contrasted = gray > 165 ? 255 : gray < 75 ? 0 : Math.min(255, Math.max(0, (gray - 128) * 1.45 + 128));
-        data[i] = contrasted;
-        data[i + 1] = contrasted;
-        data[i + 2] = contrasted;
-      }
-
-      ctx.putImageData(imgData, pad, pad);
-      return ocrCanvas;
+    function abrirModalImagem(idx = 0) {
+      if (!imagensCarregadas[idx]) return;
+      imagemSelecionadaIdx = idx;
+      const atual = imagensCarregadas[idx];
+      modalImg.src = atual.dataUrl;
+      modalTitle.textContent = `Conferência visual — ${atual.file.name}`;
+      modalCliente.value = document.getElementById("clienteInput").value;
+      modalPedido.value = document.getElementById("pedidoInput").value;
+      modalPeso.value = document.getElementById("pesoInput").value;
+      modalTotal.value = document.getElementById("totalInput").value;
+      imgModal.classList.add("open");
     }
 
-    function extractFieldsFromText(text) {
-      const clean = text.replace(/\r/g, "\n");
-      const clienteMatch =
-        clean.match(/(?:c[oó]d(?:igo)?(?:\s+d[eo])?\s*(?:cliente|cli)?|cliente)\s*[:#-]?\s*([A-Z0-9._-]{2,20})/i);
-      const pedidoMatch =
-        clean.match(/(?:n[ºo°.]?\s*pedido|pedido|ped\.?)\s*[:#-]?\s*([A-Z0-9._-]{2,20})/i);
-      const pesoMatch =
-        clean.match(/(?:peso(?:\s*\(?\s*kg\s*\)?)?|qtd\.?\s*kg)\s*[:#-]?\s*([0-9]+(?:[.,][0-9]+)?)/i) ||
-        clean.match(/([0-9]+(?:[.,][0-9]+)?)\s*kg\b/i);
-      const valorMatch =
-        clean.match(/(?:valor(?:\s*\(?\s*r\$\s*\)?)?|total|vlr\.?)\s*[:#-]?\s*R?\$?\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})|[0-9]+(?:[.,][0-9]{1,2})?)/i) ||
-        clean.match(/R\$\s*([0-9]{1,3}(?:\.[0-9]{3})*(?:,[0-9]{2})|[0-9]+(?:[.,][0-9]{1,2})?)/i);
+    function fecharModalImagem() {
+      imgModal.classList.remove("open");
+    }
 
+    openModalBtn.addEventListener("click", () => abrirModalImagem(imagemSelecionadaIdx));
+    closeModalBtn.addEventListener("click", fecharModalImagem);
+    imgModal.addEventListener("click", (e) => {
+      if (e.target === imgModal) fecharModalImagem();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && imgModal.classList.contains("open")) {
+        fecharModalImagem();
+      }
+    });
+    applyModalBtn.addEventListener("click", () => {
+      document.getElementById("clienteInput").value = modalCliente.value.trim();
+      document.getElementById("pedidoInput").value = modalPedido.value.trim();
+      document.getElementById("pesoInput").value = normalizarDecimalBr(modalPeso.value.trim());
+      document.getElementById("totalInput").value = normalizarDecimalBr(modalTotal.value.trim());
+      fecharModalImagem();
+    });
+
+    function lerImgs(files) {
+      return Promise.all(
+        Array.from(files).map(
+          (file) =>
+            new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve({ file, dataUrl: reader.result });
+              reader.onerror = () => reject(new Error(`Erro ao ler imagem: ${file.name}`));
+              reader.readAsDataURL(file);
+            })
+        )
+      );
+    }
+
+    function carregarImagem(dataUrl) {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("Falha ao carregar imagem no navegador."));
+        img.src = dataUrl;
+      });
+    }
+
+    function criarRecorteAdaptativo(img, rx, ry, rw, rh, targetWidth = 2800, padPx = 28, sharpenAmount = 0.5) {
+      const clamp01 = (v) => Math.max(0, Math.min(1, v));
+      const x0 = clamp01(rx);
+      const y0 = clamp01(ry);
+      const x1 = clamp01(rx + rw);
+      const y1 = clamp01(ry + rh);
+
+      const sx = Math.floor(img.width * x0);
+      const sy = Math.floor(img.height * y0);
+      const sw = Math.max(1, Math.floor(img.width * (x1 - x0)));
+      const sh = Math.max(1, Math.floor(img.height * (y1 - y0)));
+
+      const desiredScale = targetWidth / Math.max(sw, 1);
+      const scale = Math.max(1.2, Math.min(6.0, desiredScale));
+      const maxDim = 3200;
+      const finalScale = Math.min(scale, maxDim / Math.max(sw, sh, 1));
+
+      const innerW = Math.max(1, Math.round(sw * finalScale));
+      const innerH = Math.max(1, Math.round(sh * finalScale));
+      const w = innerW + padPx * 2;
+      const h = innerH + padPx * 2;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(img, sx, sy, sw, sh, padPx, padPx, innerW, innerH);
+
+      const imageData = ctx.getImageData(0, 0, w, h);
+      const d = imageData.data;
+      const totalPixels = w * h;
+      const gray = new Float32Array(totalPixels);
+      const hist = new Uint32Array(256);
+
+      for (let p = 0, i = 0; p < totalPixels; p++, i += 4) {
+        const g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        gray[p] = g;
+        hist[Math.min(255, Math.max(0, g | 0))]++;
+      }
+
+      let acc = 0;
+      let blackPoint = 30;
+      let whitePoint = 235;
+      const lowTarget = totalPixels * 0.015;
+      const highTarget = totalPixels * 0.80;
+
+      for (let v = 0; v < 256; v++) {
+        acc += hist[v];
+        if (acc >= lowTarget) {
+          blackPoint = Math.min(110, v);
+          break;
+        }
+      }
+      acc = 0;
+      for (let v = 0; v < 256; v++) {
+        acc += hist[v];
+        if (acc >= highTarget) {
+          whitePoint = Math.max(blackPoint + 40, Math.min(250, v));
+          break;
+        }
+      }
+
+      const range = Math.max(1, whitePoint - blackPoint);
+      const leveled = new Float32Array(totalPixels);
+      for (let p = 0; p < totalPixels; p++) {
+        const norm = ((gray[p] - blackPoint) / range) * 255;
+        leveled[p] = norm < 0 ? 0 : norm > 255 ? 255 : norm;
+      }
+
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = y * w + x;
+          let val = leveled[idx];
+          if (sharpenAmount > 0 && x > 0 && x < w - 1 && y > 0 && y < h - 1) {
+            const center = leveled[idx];
+            const neighbors =
+              leveled[idx - 1] +
+              leveled[idx + 1] +
+              leveled[idx - w] +
+              leveled[idx + w];
+            val = center * (1 + 4 * sharpenAmount) - neighbors * sharpenAmount;
+          }
+          const out = val < 0 ? 0 : val > 255 ? 255 : val;
+          const o = idx * 4;
+          d[o] = out;
+          d[o + 1] = out;
+          d[o + 2] = out;
+        }
+      }
+
+      ctx.putImageData(imageData, 0, 0);
       return {
-        codigoCliente: clienteMatch ? clienteMatch[1].trim() : "",
-        numeroPedido: pedidoMatch ? pedidoMatch[1].trim() : "",
-        pesoKg: pesoMatch ? pesoMatch[1].trim() : "",
-        valorReais: valorMatch ? valorMatch[1].trim() : ""
+        dataUrl: canvas.toDataURL("image/png"),
+        width: w,
+        height: h
       };
     }
 
-    function setImageSource(fileOrBlob) {
-      if (!fileOrBlob) return;
-      const url = URL.createObjectURL(fileOrBlob);
-      imgPreview.src = url;
-      imgPreview.style.display = "block";
-      runOcrBtn.disabled = false;
-      ocrStatus.textContent = "Imagem pronta para OCR.";
+    async function obterWorkerTesseract() {
+      if (ocrWorker) return ocrWorker;
+      ocrWorker = await Tesseract.createWorker("por", 1, {
+        logger: (m) => {
+          if (m.status === "recognizing text") {
+            const p = Math.round((m.progress || 0) * etapaOcrFaixaPct);
+            const totalPct = Math.min(99, etapaOcrBasePct + p);
+            setStatus(`OCR em andamento: ${totalPct}%...`);
+          }
+        }
+      });
+      return ocrWorker;
     }
 
-    dropzone.addEventListener("click", () => imgInput.click());
-    dropzone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      dropzone.classList.add("dragover");
-    });
-    dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
-    dropzone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      dropzone.classList.remove("dragover");
-      const file = e.dataTransfer?.files?.[0];
-      if (file && file.type.startsWith("image/")) setImageSource(file);
-    });
+    function normalizarDecimalBr(raw) {
+      if (!raw) return "";
+      let s = String(raw).trim().replace(/^[^\d]+|[^\d]+$/g, "");
+      if (!s) return "";
 
-    imgInput.addEventListener("change", (e) => {
-      const file = e.target.files?.[0];
-      if (file) setImageSource(file);
-    });
+      const mEspaco = s.match(/^(\d{1,3}(?:[.,]\d{3})*|\d+)\s+(\d{2})$/);
+      if (mEspaco) {
+        return `${mEspaco[1]},${mEspaco[2]}`;
+      }
 
-    window.addEventListener("paste", (e) => {
-      const items = e.clipboardData?.items || [];
-      for (const item of items) {
-        if (item.type && item.type.startsWith("image/")) {
-          const blob = item.getAsFile();
-          if (blob) {
-            setImageSource(blob);
-            ocrStatus.textContent = "Imagem colada via Ctrl + V.";
+      s = s.replace(/\s+/g, "");
+      if (s.includes(",") && s.includes(".")) {
+        const lastComma = s.lastIndexOf(",");
+        const lastDot = s.lastIndexOf(".");
+        if (lastComma > lastDot) return s;
+        const partes = s.split(".");
+        const dec = partes.pop();
+        return `${partes.join("").replace(/,/g, ".")},${dec}`;
+      }
+
+      if (s.includes(".")) {
+        const partes = s.split(".");
+        if (partes.length === 2 && partes[1].length <= 3) {
+          return `${partes[0]},${partes[1]}`;
+        }
+      }
+
+      if (!/[.,]/.test(s) && /^\d{4,5}$/.test(s)) {
+        return `${s.slice(0, -2)},${s.slice(-2)}`;
+      }
+
+      return s;
+    }
+
+    function extrairPorTexto(textoCompleto, textoTopoDir, textoResumo) {
+      const combinado = `${textoTopoDir}\n${textoResumo}\n${textoCompleto}`.replace(/\r/g, "\n");
+
+      let pedido = "";
+      const mRotulo = combinado.match(/Ped[a-z0-9]{2,4}[^\d\n]{0,20}((?:\d[\t ]*){6,14})\b/i);
+      if (mRotulo?.[1]) {
+        pedido = mRotulo[1].replace(/\D/g, "");
+      } else {
+        const linhasTopo = textoTopoDir.split("\n");
+        for (const linha of linhasTopo) {
+          if (/fone|tel|celular|cnpj|insc/i.test(linha)) continue;
+          const mLong = linha.match(/\b(\d{8,13})\b/);
+          if (mLong?.[1]) {
+            pedido = mLong[1];
             break;
           }
         }
+        if (!pedido) {
+          const mAnyLong = combinado.match(/\b(\d{9,13})\b/);
+          if (mAnyLong?.[1]) pedido = mAnyLong[1];
+        }
       }
-    });
 
-    clearImgBtn.addEventListener("click", () => {
-      imgPreview.src = "";
-      imgPreview.style.display = "none";
-      ocrCanvas.style.display = "none";
-      rawOcrText.textContent = "Aguardando processamento...";
-      ocrStatus.textContent = "";
-      runOcrBtn.disabled = true;
-    });
+      let cliente = "";
+      const mClienteTraco = combinado.match(/Clien[a-z0-9]{1,3}[^\d\n]{0,14}(\d{1,8})\s*-/i);
+      if (mClienteTraco?.[1]) {
+        cliente = mClienteTraco[1];
+      } else {
+        const mClienteAssinatura = combinado.match(/\n\s*(\d{1,8})\s*-\s*[A-ZÀ-Ü]{3,}/);
+        if (mClienteAssinatura?.[1]) {
+          cliente = mClienteAssinatura[1];
+        } else {
+          const mClienteGeral = combinado.match(/Clien[a-z0-9]{1,3}[^\d\n]{0,14}(\d{1,8})\b/i);
+          if (mClienteGeral?.[1]) cliente = mClienteGeral[1];
+        }
+      }
 
-    runOcrBtn.addEventListener("click", async () => {
-      if (!imgPreview.src) return;
-      try {
-        runOcrBtn.disabled = true;
-        ocrStatus.textContent = "Pré-processando imagem e rodando Tesseract...";
-        const processedCanvas = preprocessImageToCanvas(imgPreview);
+      let peso = "";
+      const fontePeso = `${textoResumo}\n${combinado}`;
+      const mPeso = fontePeso.match(/\bPeso\b[^\d\n]{0,16}(\d{1,3}(?:[.,]\d{3})*[.,]\d{1,3}|\d+\s+\d{2}|\d+)/i);
+      if (mPeso?.[1]) {
+        peso = normalizarDecimalBr(mPeso[1]);
+      }
 
-        const result = await Tesseract.recognize(processedCanvas, "por", {
-          logger: (m) => {
-            if (m.status === "recognizing text" && typeof m.progress === "number") {
-              ocrStatus.textContent = `Reconhecendo texto... ${Math.round(m.progress * 100)}%`;
-            }
+      let total = "";
+      const regexValor = /(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+\s+\d{2})/g;
+
+      const mTotalResumo = textoResumo.match(/\bTotal\b[\s:R$]{0,35}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+\s+\d{2})/i);
+      if (mTotalResumo?.[1]) {
+        total = normalizarDecimalBr(mTotalResumo[1]);
+      } else {
+        const valoresResumo = Array.from(textoResumo.matchAll(regexValor)).map((m) => normalizarDecimalBr(m[1]));
+        if (valoresResumo.length >= 2) {
+          total = valoresResumo[valoresResumo.length - 1];
+        } else if (valoresResumo.length === 1 && peso && valoresResumo[0] !== peso) {
+          total = valoresResumo[0];
+        }
+      }
+
+      if (!total) {
+        const todosTotais = Array.from(
+          combinado.matchAll(/\bTotal\b[\s:R$]{0,35}(\d{1,3}(?:[.,]\d{3})*[.,]\d{2}|\d+\s+\d{2})/gi)
+        ).map((m) => normalizarDecimalBr(m[1]));
+        if (todosTotais.length > 0) {
+          total = todosTotais[todosTotais.length - 1];
+        }
+      }
+
+      if (!total) {
+        const mItens = combinado.match(/Itens[^\d]{0,10}(\d+)/i);
+        if (mItens && Number(mItens[1]) === 1) {
+          const valsLinhaProduto = Array.from(textoCompleto.matchAll(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\b/g)).map((m) =>
+            normalizarDecimalBr(m[1])
+          );
+          if (valsLinhaProduto.length > 0) {
+            total = valsLinhaProduto[valsLinhaProduto.length - 1];
           }
+        }
+      }
+
+      return { cliente, pedido, peso, total };
+    }
+
+    async function processarPrint(itemImg) {
+      const img = await carregarImagem(itemImg.dataUrl);
+      const worker = await obterWorkerTesseract();
+
+      etapaOcrBasePct = 0;
+      etapaOcrFaixaPct = 34;
+      const topoDirPrep = criarRecorteAdaptativo(img, 0.44, 0.04, 0.56, 0.16, 2600, 28, 0.45);
+      await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "6" });
+      const topoDirRes = await worker.recognize(topoDirPrep.dataUrl);
+
+      etapaOcrBasePct = 34;
+      etapaOcrFaixaPct = 33;
+      const resumoPrep = criarRecorteAdaptativo(img, 0.0, 0.24, 1.0, 0.24, 2800, 28, 0.55);
+      await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "6" });
+      const resumoRes = await worker.recognize(resumoPrep.dataUrl);
+
+      etapaOcrBasePct = 67;
+      etapaOcrFaixaPct = 33;
+      const fullPrep = criarRecorteAdaptativo(img, 0, 0, 1, 1, 2600, 20, 0.4);
+      await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "3" });
+      const fullRes = await worker.recognize(fullPrep.dataUrl);
+
+      await worker.setParameters({ tessedit_char_whitelist: "", tessedit_pageseg_mode: "3" });
+      etapaOcrBasePct = 0;
+
+      const resultado = extrairPorTexto(
+        fullRes.data?.text || "",
+        topoDirRes.data?.text || "",
+        resumoRes.data?.text || ""
+      );
+
+      const faltantes = [];
+      if (!resultado.cliente) faltantes.push("Cliente");
+      if (!resultado.pedido) faltantes.push("Pedido");
+      if (!resultado.peso) faltantes.push("Peso");
+      if (!resultado.total) faltantes.push("Valor R$");
+
+      if (faltantes.length > 0) {
+        return {
+          ...resultado,
+          aviso: `OCR não isolou [${faltantes.join(", ")}] em "${itemImg.file.name}". Confira na imagem ampliada ou preencha manualmente.`
+        };
+      }
+
+      return { ...resultado, aviso: "" };
+    }
+
+    function renderUltimaLinha(item) {
+      if (!item) return;
+      linhaNumeroLabel.textContent = `Linha ${item.linha} (${nomeAbaEncontrada} — A..M)`;
+      const detalhes = [
+        { ref: `A${item.linha}`, rotulo: "Data", val: item.dataDisplay || "-" },
+        { ref: `B${item.linha}`, rotulo: "Mês", val: item.mesDisplay || "-" },
+        { ref: `C${item.linha}`, rotulo: "Cliente", val: item.cliente || "-" },
+        { ref: `D${item.linha}`, rotulo: "Peso kg", val: item.peso || "-" },
+        { ref: `E${item.linha}`, rotulo: "Valor R$", val: item.total || "-" },
+        { ref: `F${item.linha}`, rotulo: "Pedido", val: item.pedido || "-" },
+        { ref: `I${item.linha}`, rotulo: "Status", val: item.statusDisplay || "-" },
+        { ref: `M${item.linha}`, rotulo: "Col. M", val: item.colMDisplay || "-" }
+      ];
+      linhaCelulasGrid.innerHTML = detalhes
+        .map((d) => `<div class="celula-box"><strong>${d.ref}</strong> (${d.rotulo}): ${escapeXml(d.val)}</div>`)
+        .join("");
+    }
+
+    function render() {
+      tabelaPedidos.innerHTML = "";
+      pedidosAdicionados.forEach((item, idx) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td><strong>Linha ${escapeXml(item.linha)}</strong></td>
+          <td>${escapeXml(item.cliente)}</td>
+          <td>${escapeXml(item.pedido)}</td>
+          <td>${escapeXml(item.peso)}</td>
+          <td>${escapeXml(item.total)}</td>
+          <td>${escapeXml(item.colMDisplay || "-")}</td>
+        `;
+        tabelaPedidos.appendChild(tr);
+      });
+      if (pedidosAdicionados.length > 0) {
+        renderUltimaLinha(pedidosAdicionados[pedidosAdicionados.length - 1]);
+      }
+      atualizarEstadoDownload();
+    }
+
+    async function processarImagensSelecionadas(files) {
+      thumbsEl.innerHTML = "";
+      imagensCarregadas = [];
+      openModalBtn.disabled = true;
+      if (!files || files.length === 0) return;
+
+      try {
+        const imagens = await lerImgs(files);
+        imagensCarregadas = imagens;
+        imagemSelecionadaIdx = 0;
+        openModalBtn.disabled = imagens.length === 0;
+
+        imagens.forEach((img, idx) => {
+          const el = document.createElement("img");
+          el.src = img.dataUrl;
+          el.alt = img.file.name;
+          el.title = "Clique para ampliar e conferir com os campos";
+          el.addEventListener("click", () => abrirModalImagem(idx));
+          thumbsEl.appendChild(el);
         });
 
-        const text = result?.data?.text || "";
-        rawOcrText.textContent = text.trim() || "(Nenhum texto detectado)";
+        document.getElementById("clienteInput").value = "";
+        document.getElementById("pedidoInput").value = "";
+        document.getElementById("pesoInput").value = "";
+        document.getElementById("totalInput").value = "";
 
-        const extracted = extractFieldsFromText(text);
-        if (extracted.codigoCliente) codigoClienteEl.value = extracted.codigoCliente;
-        if (extracted.numeroPedido) numeroPedidoEl.value = extracted.numeroPedido;
-        if (extracted.pesoKg) pesoKgEl.value = extracted.pesoKg;
-        if (extracted.valorReais) valorReaisEl.value = extracted.valorReais;
+        setStatus("OCR em andamento: 0%...");
+        const resultado = await processarPrint(imagens[0]);
+        if (resultado.cliente) document.getElementById("clienteInput").value = resultado.cliente;
+        if (resultado.pedido) document.getElementById("pedidoInput").value = resultado.pedido;
+        if (resultado.peso) document.getElementById("pesoInput").value = resultado.peso;
+        if (resultado.total) document.getElementById("totalInput").value = resultado.total;
 
-        ocrStatus.textContent = "OCR concluído. Confira os campos antes de inserir.";
+        const resumo = [
+          `Cód. Cliente: ${resultado.cliente || "-"}`,
+          `Pedido: ${resultado.pedido || "-"}`,
+          `Peso: ${resultado.peso || "-"}`,
+          `Valor: ${resultado.total || "-"}`
+        ].join("\n");
+
+        if (resultado.aviso) {
+          setStatus(`${resultado.aviso}\n\n${resumo}`, true);
+        } else {
+          setStatus(`OCR concluído para "${imagens[0].file.name}". Clique na imagem para ampliar e comparar.\n${resumo}`);
+        }
       } catch (err) {
-        ocrStatus.textContent = `Falha no OCR: ${err.message}`;
-      } finally {
-        runOcrBtn.disabled = false;
+        setStatus(`Erro ao ler ${files[0]?.name || "imagem"}: ${err.message || "Falha no OCR."}`, true);
+      }
+    }
+
+    imgInput.addEventListener("change", async (e) => {
+      await processarImagensSelecionadas(e.target.files);
+    });
+
+    document.addEventListener("paste", async (e) => {
+      const activeTag = document.activeElement?.tagName?.toLowerCase();
+      const isTextInput =
+        activeTag === "input" &&
+        (document.activeElement.type === "text" || document.activeElement.type === "number");
+      if (isTextInput) return;
+
+      const items = Array.from(e.clipboardData?.items || []);
+      const imageFiles = items
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item, idx) => {
+          const blob = item.getAsFile();
+          if (!blob) return null;
+          const ext = (item.type.split("/")[1] || "png").replace(/[^a-z0-9]/gi, "");
+          return new File([blob], `print_colado_${Date.now()}_${idx + 1}.${ext}`, { type: item.type });
+        })
+        .filter(Boolean);
+
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        setStatus(`Imagem colada via Ctrl + V (${imageFiles.length}). Iniciando OCR...`);
+        await processarImagensSelecionadas(imageFiles);
       }
     });
 
-    function buildCellXml(ref, styleIdx, rawValue, forceString = false) {
-      const sAttr = styleIdx !== null && styleIdx !== undefined ? ` s="${escapeXml(styleIdx)}"` : "";
-      const num = !forceString ? parseNumberPtBr(rawValue) : NaN;
-      if (!forceString && Number.isFinite(num) && String(rawValue).trim() !== "") {
-        return `<c r="${ref}"${sAttr}><v>${num}</v></c>`;
+    function parseNumeroFlex(val) {
+      if (val === "" || val === null || val === undefined) return null;
+      let s = String(val).trim().replace(/\s+/g, "");
+      if (!s) return null;
+      if (s.includes(",") && s.includes(".")) {
+        s = s.replace(/\./g, "").replace(",", ".");
+      } else if (s.includes(",")) {
+        s = s.replace(",", ".");
       }
-      const strIdx = getOrCreateSharedStringIndex(String(rawValue ?? ""));
-      return `<c r="${ref}"${sAttr} t="s"><v>${strIdx}</v></c>`;
+      const n = Number(s);
+      return Number.isNaN(n) ? null : n;
     }
 
-    function adicionarNaPlanilha() {
-      if (!state.baseSheetXml || !state.nextRowNumber) {
-        rowStatus.textContent = "Carregue uma planilha .xlsx com aba BASE primeiro.";
-        return;
+    function criarCelula(ref, estiloIdx, tipo, valorRaw) {
+      const styleAttr = estiloIdx ? ` s="${estiloIdx}"` : "";
+      if (valorRaw === null || valorRaw === undefined || valorRaw === "") {
+        return `<c r="${ref}"${styleAttr}/>`;
       }
-
-      const cliente = codigoClienteEl.value.trim();
-      const pedido = numeroPedidoEl.value.trim();
-      const peso = pesoKgEl.value.trim();
-      const valor = valorReaisEl.value.trim();
-
-      if (!cliente && !pedido && !peso && !valor) {
-        rowStatus.textContent = "Preencha ao menos um campo antes de adicionar.";
-        return;
+      if (tipo === "s") {
+        return `<c r="${ref}"${styleAttr} t="s"><v>${escapeXml(valorRaw)}</v></c>`;
       }
-
-      const rowNum = state.nextRowNumber;
-      const styleMap = getTemplateRowStyleMap(state.baseSheetXml, rowNum);
-
-      // Mapeamento padrão nas colunas iniciais da aba BASE (A..M preservados)
-      const valuesByCol = {
-        A: cliente,
-        B: pedido,
-        C: peso,
-        D: valor
-      };
-
-      const forceStringCols = new Set(["A", "B"]);
-      const cellsXml = COL_LETTERS.map((letter) => {
-        const ref = `${letter}${rowNum}`;
-        const val = valuesByCol[letter] ?? "";
-        return buildCellXml(ref, styleMap[letter], val, forceStringCols.has(letter));
-      }).join("");
-
-      const novaLinhaXml = `<row r="${rowNum}">${cellsXml}</row>`;
-      const parser = new DOMParser();
-      const rowDoc = parser.parseFromString(
-        `<wrapper xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${novaLinhaXml}</wrapper>`,
-        "application/xml"
-      );
-      const importedRow = state.baseSheetXml.importNode(rowDoc.documentElement.firstChild, true);
-
-      const sheetData = state.baseSheetXml.getElementsByTagName("sheetData")[0];
-      const existingRow = Array.from(sheetData.getElementsByTagName("row")).find(
-        (r) => parseInt(r.getAttribute("r"), 10) === rowNum
-      );
-
-      if (existingRow) {
-        sheetData.replaceChild(importedRow, existingRow);
-      } else {
-        sheetData.appendChild(importedRow);
+      if (tipo === "inlineStr") {
+        return `<c r="${ref}"${styleAttr} t="inlineStr"><is><t xml:space="preserve">${escapeXml(valorRaw)}</t></is></c>`;
       }
-
-      state.sessionRows.push({ rowNum, cliente, pedido, peso, valor });
-      state.nextRowNumber = rowNum + 1;
-
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${state.sessionRows.length}</td>
-        <td>${rowNum}</td>
-        <td>${escapeXml(cliente)}</td>
-        <td>${escapeXml(pedido)}</td>
-        <td>${escapeXml(peso)}</td>
-        <td>${escapeXml(valor)}</td>
-      `;
-      addedTableBody.appendChild(tr);
-      itemCountEl.textContent = String(state.sessionRows.length);
-
-      codigoClienteEl.value = "";
-      numeroPedidoEl.value = "";
-      pesoKgEl.value = "";
-      valorReaisEl.value = "";
-      rowStatus.textContent = `Linha ${rowNum} adicionada na aba BASE com sucesso.`;
+      return `<c r="${ref}"${styleAttr}><v>${escapeXml(valorRaw)}</v></c>`;
     }
 
-    addRowBtn.addEventListener("click", adicionarNaPlanilha);
+    function encontrarProximaLinhaAtiva(sheetXml) {
+      const rowRegex = /<row\b([^>]*)>([\s\S]*?)<\/row>/g;
+      let match;
+      let ultimaLinhaComConteudo = 1;
+      let ultimaRowXml = "";
 
-    downloadXlsxBtn.addEventListener("click", async () => {
-      if (!state.zip || !state.baseSheetXml) return;
-      try {
-        const serializer = new XMLSerializer();
-        state.zip.file(state.baseSheetPath, serializer.serializeToString(state.baseSheetXml));
-        if (state.sharedStringsXml) {
-          state.zip.file("xl/sharedStrings.xml", serializer.serializeToString(state.sharedStringsXml));
+      while ((match = rowRegex.exec(sheetXml)) !== null) {
+        const attrs = match[1];
+        const inner = match[2];
+        const rMatch = attrs.match(/\br="(\d+)"/);
+        if (!rMatch) continue;
+        const rNum = Number(rMatch[1]);
+        if (rNum <= 1) continue;
+
+        const temValor = /<(?:v|t)[^>]*>[^<\s][^<]*<\/(?:v|t)>/.test(inner);
+        if (temValor) {
+          ultimaLinhaComConteudo = rNum;
+          ultimaRowXml = match[0];
         }
-        const blob = await state.zip.generateAsync({ type: "blob" });
+      }
+
+      return {
+        proximaLinha: ultimaLinhaComConteudo + 1,
+        ultimaRowXml
+      };
+    }
+
+    function extrairEstilosEValoresModelo(ultimaRowXml) {
+      const estilos = {
+        A: "56", B: "57", C: "57", D: "58", E: "59", F: "60",
+        G: "57", H: "57", I: "57", J: "57", K: "57", L: "57", M: "61"
+      };
+      let dataSerial = "";
+      let mesSsIdx = "";
+      let statusSsIdx = "";
+      let colMSsIdx = "";
+      let colMValorDireto = "";
+
+      if (ultimaRowXml) {
+        const celulas = Array.from(ultimaRowXml.matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g));
+        for (const [, attrs, inner] of celulas) {
+          const refM = attrs.match(/\br="([A-Z]+)\d+"/);
+          if (!refM) continue;
+          const col = refM[1];
+          const sM = attrs.match(/\bs="(\d+)"/);
+          if (sM) estilos[col] = sM[1];
+
+          const tM = attrs.match(/\bt="([^"]+)"/);
+          const vM = inner.match(/<v>([^<]+)<\/v>/);
+          const isM = inner.match(/<t[^>]*>([^<]*)<\/t>/);
+
+          if (col === "A" && vM) dataSerial = vM[1].trim();
+          if (col === "B" && tM?.[1] === "s" && vM) mesSsIdx = vM[1].trim();
+          if (col === "I" && tM?.[1] === "s" && vM) statusSsIdx = vM[1].trim();
+          if (col === "M") {
+            if (tM?.[1] === "s" && vM) {
+              colMSsIdx = vM[1].trim();
+            } else if (vM) {
+              colMValorDireto = vM[1].trim();
+            } else if (isM) {
+              colMValorDireto = isM[1];
+            }
+          }
+        }
+      }
+
+      if (!mesSsIdx) {
+        const idxNov = sharedStringsList.findIndex((txt) => txt.trim().toLowerCase() === "novembro");
+        if (idxNov >= 0) mesSsIdx = String(idxNov);
+      }
+      if (!statusSsIdx) {
+        const idxSep = sharedStringsList.findIndex((txt) => txt.trim().toUpperCase() === "SEPARADO");
+        if (idxSep >= 0) statusSsIdx = String(idxSep);
+      }
+      if (!colMSsIdx && !colMValorDireto) {
+        const idxV = sharedStringsList.findIndex((txt) => txt.trim().toLowerCase() === "v");
+        if (idxV >= 0) colMSsIdx = String(idxV);
+      }
+
+      return { estilos, dataSerial, mesSsIdx, statusSsIdx, colMSsIdx, colMValorDireto };
+    }
+
+    async function adicionarNaPlanilha() {
+      if (!zipInstance || !baseSheetPath) {
+        setStatus("Carregue primeiro o arquivo .xlsx antes de adicionar pedidos.", true);
+        return;
+      }
+
+      const clienteStr = document.getElementById("clienteInput").value.trim();
+      const pedidoStr = document.getElementById("pedidoInput").value.trim();
+      const pesoStr = normalizarDecimalBr(document.getElementById("pesoInput").value.trim());
+      const totalStr = normalizarDecimalBr(document.getElementById("totalInput").value.trim());
+
+      if (!clienteStr && !pedidoStr && !pesoStr && !totalStr) {
+        setStatus("Preencha ao menos um campo antes de adicionar à aba BASE.", true);
+        return;
+      }
+
+      try {
+        let sheetXml = await zipInstance.file(baseSheetPath).async("string");
+        const { proximaLinha, ultimaRowXml } = encontrarProximaLinhaAtiva(sheetXml);
+        const { estilos, dataSerial, mesSsIdx, statusSsIdx, colMSsIdx, colMValorDireto } = extrairEstilosEValoresModelo(ultimaRowXml);
+
+        const clienteNum = parseNumeroFlex(clienteStr);
+        const pedidoNum = parseNumeroFlex(pedidoStr);
+        const pesoNum = parseNumeroFlex(pesoStr);
+        const totalNum = parseNumeroFlex(totalStr);
+
+        const cA = dataSerial ? criarCelula(`A${proximaLinha}`, estilos.A, "n", dataSerial) : `<c r="A${proximaLinha}" s="${estilos.A}"/>`;
+        const cB = mesSsIdx ? criarCelula(`B${proximaLinha}`, estilos.B, "s", mesSsIdx) : `<c r="B${proximaLinha}" s="${estilos.B}"/>`;
+        const cC = clienteNum !== null
+          ? criarCelula(`C${proximaLinha}`, estilos.C, "n", clienteNum)
+          : (clienteStr ? criarCelula(`C${proximaLinha}`, estilos.C, "inlineStr", clienteStr) : `<c r="C${proximaLinha}" s="${estilos.C}"/>`);
+        const cD = pesoNum !== null
+          ? criarCelula(`D${proximaLinha}`, estilos.D, "n", pesoNum)
+          : (pesoStr ? criarCelula(`D${proximaLinha}`, estilos.D, "inlineStr", pesoStr) : `<c r="D${proximaLinha}" s="${estilos.D}"/>`);
+        const cE = totalNum !== null
+          ? criarCelula(`E${proximaLinha}`, estilos.E, "n", totalNum)
+          : (totalStr ? criarCelula(`E${proximaLinha}`, estilos.E, "inlineStr", totalStr) : `<c r="E${proximaLinha}" s="${estilos.E}"/>`);
+        const cF = pedidoNum !== null
+          ? criarCelula(`F${proximaLinha}`, estilos.F, "n", pedidoNum)
+          : (pedidoStr ? criarCelula(`F${proximaLinha}`, estilos.F, "inlineStr", pedidoStr) : `<c r="F${proximaLinha}" s="${estilos.F}"/>`);
+        const cG = `<c r="G${proximaLinha}" s="${estilos.G}"/>`;
+        const cH = `<c r="H${proximaLinha}" s="${estilos.H}"/>`;
+        const cI = statusSsIdx ? criarCelula(`I${proximaLinha}`, estilos.I, "s", statusSsIdx) : `<c r="I${proximaLinha}" s="${estilos.I}"/>`;
+        const cJ = `<c r="J${proximaLinha}" s="${estilos.J}"/>`;
+        const cK = `<c r="K${proximaLinha}" s="${estilos.K}"/>`;
+        const cL = `<c r="L${proximaLinha}" s="${estilos.L}"/>`;
+        const cM = colMSsIdx
+          ? criarCelula(`M${proximaLinha}`, estilos.M, "s", colMSsIdx)
+          : (colMValorDireto ? criarCelula(`M${proximaLinha}`, estilos.M, "inlineStr", colMValorDireto) : `<c r="M${proximaLinha}" s="${estilos.M}"/>`);
+
+        const novaLinhaXml = `<row r="${proximaLinha}" spans="1:13" x14ac:dyDescent="0.25">${cA}${cB}${cC}${cD}${cE}${cF}${cG}${cH}${cI}${cJ}${cK}${cL}${cM}</row>`;
+
+        const linhaExistenteRegex = new RegExp(`<row\\b[^>]*\\br="${proximaLinha}"[^>]*>[\\s\\S]*?<\\/row>`);
+        if (linhaExistenteRegex.test(sheetXml)) {
+          sheetXml = sheetXml.replace(linhaExistenteRegex, novaLinhaXml);
+        } else {
+          const rowScan = /<row\b[^>]*\br="(\d+)"[^>]*>/g;
+          let mScan;
+          let inserted = false;
+          while ((mScan = rowScan.exec(sheetXml)) !== null) {
+            if (Number(mScan[1]) > proximaLinha) {
+              const pos = mScan.index;
+              sheetXml = sheetXml.slice(0, pos) + novaLinhaXml + sheetXml.slice(pos);
+              inserted = true;
+              break;
+            }
+          }
+          if (!inserted) {
+            if (!sheetXml.includes("</sheetData>")) {
+              throw new Error("Tag </sheetData> não encontrada no XML da aba BASE.");
+            }
+            sheetXml = sheetXml.replace("</sheetData>", `${novaLinhaXml}</sheetData>`);
+          }
+        }
+
+        zipInstance.file(baseSheetPath, sheetXml);
+
+        const mesDisplay = mesSsIdx && sharedStringsList[Number(mesSsIdx)] ? sharedStringsList[Number(mesSsIdx)] : mesSsIdx;
+        const statusDisplay = statusSsIdx && sharedStringsList[Number(statusSsIdx)] ? sharedStringsList[Number(statusSsIdx)] : statusSsIdx;
+        const colMDisplay = colMSsIdx && sharedStringsList[Number(colMSsIdx)] ? sharedStringsList[Number(colMSsIdx)] : (colMValorDireto || "-");
+
+        pedidosAdicionados.push({
+          linha: proximaLinha,
+          cliente: clienteStr,
+          pedido: pedidoStr,
+          peso: pesoStr,
+          total: totalStr,
+          dataDisplay: dataSerial,
+          mesDisplay,
+          statusDisplay,
+          colMDisplay
+        });
+        render();
+
+        document.getElementById("clienteInput").value = "";
+        document.getElementById("pedidoInput").value = "";
+        document.getElementById("pesoInput").value = "";
+        document.getElementById("totalInput").value = "";
+
+        setStatus(`Linha ${proximaLinha} preenchida na aba "${nomeAbaEncontrada}" (A..M) — A${proximaLinha}: ${dataSerial || "-"} | B${proximaLinha}: ${mesDisplay || "-"} | C${proximaLinha}: ${clienteStr || "-"} | D${proximaLinha}: ${pesoStr || "-"} | E${proximaLinha}: ${totalStr || "-"} | F${proximaLinha}: ${pedidoStr || "-"} | I${proximaLinha}: ${statusDisplay || "-"} | M${proximaLinha}: ${colMDisplay}. Botão de download liberado.`);
+      } catch (err) {
+        setStatus(err.message || "Erro ao atualizar a aba BASE.", true);
+      }
+    }
+
+    async function baixarPlanilha() {
+      if (!zipInstance || pedidosAdicionados.length === 0) {
+        setStatus("Adicione ao menos um pedido antes de baixar a planilha.", true);
+        return;
+      }
+
+      try {
+        const blob = await zipInstance.generateAsync({ type: "blob" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = "fennix_base_atualizada.xlsx";
+        a.download = arquivoOriginalNome;
+        document.body.appendChild(a);
         a.click();
-        URL.revokeObjectURL(url);
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1500);
+        setStatus(`Download iniciado: ${arquivoOriginalNome} (abas LOJA, ${nomeAbaEncontrada} e BASE 2 preservadas).`);
       } catch (err) {
-        rowStatus.textContent = `Erro ao gerar .xlsx: ${err.message}`;
+        setStatus(err.message || "Erro ao gerar o arquivo .xlsx para download.", true);
       }
-    });
+    }
+
+    addBtn.addEventListener("click", adicionarNaPlanilha);
+    downloadBtn.addEventListener("click", baixarPlanilha);
+    atualizarEstadoDownload();
   </script>
 </body>
 </html>
