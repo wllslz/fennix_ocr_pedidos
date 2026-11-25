@@ -63,18 +63,18 @@
 <body>
   <div class="container">
     <h1>Fennix OCR Pedidos</h1>
-    <p class="sub">Preenche a próxima linha ativa da aba <strong>BASE </strong> no formato exato (colunas A a M) mantendo XML e abas intactas.</p>
+    <p class="sub">Preenche a próxima linha ativa da aba <strong>BASE </strong> no formato exato (colunas A a M) mantendo XML e abas intactas. Suporta seleção de ficheiros ou colagem direta com <strong>Ctrl + V</strong>.</p>
 
     <div class="grid">
       <div class="card">
         <label for="xlsxInput">1. Planilha base (.xlsx)</label>
         <input id="xlsxInput" type="file" accept=".xlsx" />
 
-        <label for="imgInput">2. Prints / imagens de pedidos</label>
+        <label for="imgInput">2. Prints / imagens de pedidos (ou cole com Ctrl + V)</label>
         <input id="imgInput" type="file" accept="image/*" multiple />
 
         <div class="thumbs" id="thumbs"></div>
-        <div class="status" id="statusBox">Aguardando seleção da planilha (.xlsx) e das imagens.</div>
+        <div class="status" id="statusBox">Aguardando seleção da planilha (.xlsx) e das imagens (ou Ctrl + V).</div>
       </div>
 
       <div class="card">
@@ -433,8 +433,7 @@
       atualizarEstadoDownload();
     }
 
-    imgInput.addEventListener("change", async (e) => {
-      const files = e.target.files;
+    async function processarImagensSelecionadas(files) {
       thumbsEl.innerHTML = "";
       if (!files || files.length === 0) return;
 
@@ -474,6 +473,35 @@
         }
       } catch (err) {
         setStatus(`Erro ao ler ${files[0]?.name || "imagem"}: ${err.message || "Falha no OCR."}`, true);
+      }
+    }
+
+    imgInput.addEventListener("change", async (e) => {
+      await processarImagensSelecionadas(e.target.files);
+    });
+
+    document.addEventListener("paste", async (e) => {
+      const activeTag = document.activeElement?.tagName?.toLowerCase();
+      const isTextInput =
+        activeTag === "input" &&
+        (document.activeElement.type === "text" || document.activeElement.type === "number");
+      if (isTextInput) return;
+
+      const items = Array.from(e.clipboardData?.items || []);
+      const imageFiles = items
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item, idx) => {
+          const blob = item.getAsFile();
+          if (!blob) return null;
+          const ext = (item.type.split("/")[1] || "png").replace(/[^a-z0-9]/gi, "");
+          return new File([blob], `print_colado_${Date.now()}_${idx + 1}.${ext}`, { type: item.type });
+        })
+        .filter(Boolean);
+
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        setStatus(`Imagem colada via Ctrl + V (${imageFiles.length}). Iniciando OCR...`);
+        await processarImagensSelecionadas(imageFiles);
       }
     });
 

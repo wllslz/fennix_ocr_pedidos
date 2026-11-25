@@ -2,6 +2,14 @@
 
 Todas as mudanças notáveis, diagnósticos e etapas do processo deste projeto serão documentadas neste arquivo.
 
+## [1.3.1] - 2026-11-25
+
+### Processo geral e diagnóstico
+- **Colagem direta de imagens via Ctrl + V (`paste`):** adicionou-se captura de imagens da área de transferência no navegador para agilizar o fluxo de prints e recortes sem precisar salvar o ficheiro antes de selecionar.
+
+### Adicionado
+- Listener global de `paste` convertendo imagens da área de transferência em objetos `File` e encaminhando para o mesmo pipeline de pré-visualização e OCR (`processarImagensSelecionadas`), preservando a digitação normal com `Ctrl + V` nos campos de texto.
+
 ## [1.3.0] - 2026-11-25
 
 ### Processo geral e diagnóstico
